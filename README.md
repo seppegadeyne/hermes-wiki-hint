@@ -21,10 +21,18 @@ Two lifecycle hooks, no tools:
   - *First turn of a session*: injects a short reminder that a wiki exists at
     `$WIKI_PATH`, and to orient via `index.md` / `SCHEMA.md` / recent `log.md`
     before external research.
-  - *Later turns*: parses `index.md`, scores each entry against the user
-    message by keyword overlap (prefix-tolerant, so inflected word forms
-    still match), and injects up to 3 matching page lines (truncated to 220
-    chars each).
+  - *Every turn (first included) with a relevant question*: parses `index.md`
+    and scores each entry against the user message:
+    - Hyphenated wiki slugs are split (`pool-build-quote` also matches
+      "pool", "build", "quote"), so hyphens no longer hide matches.
+    - Prefix-tolerant comparison catches inflected forms (pump/pumps,
+      cheap/cheaper) and loose words match inside compounds
+      (pump in "sandfilterpump").
+    - One overlapping term suffices when it is rare across the index
+      (document frequency <= 3 pages), so "the charger acts weird" finds
+      the charger page without generic words injecting noise.
+    - Injects up to 3 matching page lines (truncated to 220 chars each);
+    trivial questions ("capital of France") inject nothing.
 - **`post_tool_call`** (observer): counts research tool calls
   (`web_search`, `web_extract`, `browser_exec`, `session_search`) per session.
   Every 5th call arms a one-shot nudge in the next turn: "evaluate NOW
@@ -69,6 +77,10 @@ Restart any running gateway so the hooks load.
   - `MAX_NUDGES_PER_SESSION = 3`
   - `MAX_INJECT_MATCHES = 3` — max wiki pages injected per turn
   - `MAX_LINE_CHARS = 220` — injected index-line truncation
+  - `MIN_OVERLAP = 2` / `RARE_DF_MAX = 3` — page match threshold, and the
+    document frequency under which a single rare term counts as a match
+  - `MIN_WORD_LEN`, `FUZZY_PREFIX`, `MIN_SUBSTR_LEN` — tokenizer/matcher
+    knobs (hyphen splitting, prefix tolerance, substring containment)
 
 Injected context is appended to the user message (not the system prompt), so
 prompt caching stays intact, and Hermes spills anything over 10k chars to a

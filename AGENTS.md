@@ -36,3 +36,16 @@ This plugin exists as two deliberately different copies:
 - Injection stays short: max 3 index lines, each truncated to 220 chars.
 - Save nudge: every 5 research calls, max 3 per session.
 - All thresholds are constants at the top of `__init__.py`.
+
+## Matching v2 (since 1.1.0)
+
+- `_tokenize` splits hyphenated slugs (`pool-build-quote` -> pool, build,
+  quote, and the whole) and drops stopwords/short words.
+- `_fuzzy_eq`: equal, prefix-tolerant (pump/pumps), or substring containment
+  (pump in sandfilterpump).
+- `_best_matches`: threshold of 2 overlapping terms, OR 1 rare term
+  (document frequency <= RARE_DF_MAX across index.md). Deterministic order
+  via a sorted match-key tiebreaker.
+- Multimodal user_messages (list-of-parts) are flattened to text.
+- Page matches fire on EVERY turn (first included) with a relevant question;
+  trivial questions stay injection-free.
