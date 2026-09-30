@@ -1,5 +1,5 @@
 name: wiki-hint
-version: 1.1.0
+version: 1.1.1
 description: Nudges the agent to use its llm-wiki during research and proactively save durable findings
 author: seppegadeyne
 provides_hooks:

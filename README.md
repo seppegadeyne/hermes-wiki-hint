@@ -80,7 +80,9 @@ Restart any running gateway so the hooks load.
   - `MIN_OVERLAP = 2` / `RARE_DF_MAX = 3` — page match threshold, and the
     document frequency under which a single rare term counts as a match
   - `MIN_WORD_LEN`, `FUZZY_PREFIX`, `MIN_SUBSTR_LEN` — tokenizer/matcher
-    knobs (hyphen splitting, prefix tolerance, substring containment)
+    knobs (hyphen splitting, prefix tolerance, substring containment). A
+    single-term match additionally requires the term to appear in the page
+    slug itself, not only in the index summary.
 
 Injected context is appended to the user message (not the system prompt), so
 prompt caching stays intact, and Hermes spills anything over 10k chars to a

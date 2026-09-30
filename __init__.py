@@ -30,8 +30,8 @@ MAX_INJECT_MATCHES = 3
 MAX_LINE_CHARS = 220         # truncation per injected index line
 MIN_WORD_LEN = 3             # shorter (sub)words are noise
 MIN_OVERLAP = 2              # content terms that must overlap
-FUZZY_PREFIX = 4             # shared-prefix length for a fuzzy match
-MIN_SUBSTR_LEN = 4           # min length for substring matching (pump in sandfilterpump)
+FUZZY_PREFIX = 5             # shared-prefix length for a fuzzy match
+MIN_SUBSTR_LEN = 6           # min length for substring matching (pump in sandfilterpump)
 RARE_DF_MAX = 3              # word in <= this many index pages counts as rare
 
 STOPWORDS = {
@@ -155,7 +155,7 @@ def _index_entries(wiki):
             title = slug.rsplit("/", 1)[-1].replace("-", " ")
             # index summaries can be very long; keep the injection short
             short = line.strip()[:MAX_LINE_CHARS]
-            entries.append((title, _tokenize(line), short))
+            entries.append((title, _tokenize(slug), _tokenize(line), short))
         _index_cache["path"] = idx
         _index_cache["mtime"] = mtime
         _index_cache["entries"] = entries
@@ -170,20 +170,26 @@ def _best_matches(user_message, entries):
     if not q:
         return []
     hit_lists = []  # (matched query words, line)
-    for title, tokens, line in entries:
+    for title, slug_tokens, tokens, line in entries:
         matched = tuple(w for w in q if any(_fuzzy_eq(w, v) for v in tokens))
         if matched:
-            hit_lists.append((matched, line))
+            hit_lists.append((matched, slug_tokens, line))
     if not hit_lists:
         return []
     df = {}
-    for matched, _ in hit_lists:
+    for matched, _, _ in hit_lists:
         for w in matched:
             df[w] = df.get(w, 0) + 1
     scored = []
-    for matched, line in hit_lists:
-        if len(matched) >= MIN_OVERLAP or df[matched[0]] <= RARE_DF_MAX:
-            scored.append((len(matched), " ".join(sorted(matched)), line))
+    for matched, slug_tokens, line in hit_lists:
+        single = len(matched) < MIN_OVERLAP
+        if single:
+            w = matched[0]
+            if df[w] > RARE_DF_MAX or not any(
+                _fuzzy_eq(w, v) for v in slug_tokens
+            ):
+                continue
+        scored.append((len(matched), " ".join(sorted(matched)), line))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [line for _, _, line in scored[:MAX_INJECT_MATCHES]]
 
