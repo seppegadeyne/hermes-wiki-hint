@@ -35,7 +35,7 @@ Two lifecycle hooks, no tools:
     trivial questions ("capital of France") inject nothing.
 - **`post_tool_call`** (observer): counts research tool calls
   (`web_search`, `web_extract`, `browser_exec`, `session_search`) per session.
-  Every 5th call arms a one-shot nudge in the next turn: "evaluate NOW
+  Every 3rd call arms a one-shot nudge in the next turn: "evaluate NOW
   whether durable findings should be saved to the wiki, following the
   llm-wiki skill". Max 3 nudges per session, so it never becomes noise.
 
@@ -73,7 +73,7 @@ Restart any running gateway so the hooks load.
 - Wiki root resolution: `$WIKI_PATH` (if set and an existing directory),
   otherwise `~/wiki`. Edit `WIKI_FALLBACK` in `__init__.py` to change it.
 - Tunables at the top of `__init__.py`:
-  - `NUDGE_THRESHOLD = 5` — research calls between save nudges
+  - `NUDGE_THRESHOLD = 3` — research calls between save nudges
   - `MAX_NUDGES_PER_SESSION = 3`
   - `MAX_INJECT_MATCHES = 3` — max wiki pages injected per turn
   - `MAX_LINE_CHARS = 220` — injected index-line truncation

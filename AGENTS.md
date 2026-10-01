@@ -34,7 +34,7 @@ This plugin exists as two deliberately different copies:
 - The plugin NEVER writes to the wiki itself; context injection via
   `pre_llm_call` and observation via `post_tool_call` only.
 - Injection stays short: max 3 index lines, each truncated to 220 chars.
-- Save nudge: every 5 research calls, max 3 per session.
+- Save nudge: every 3 research calls, max 3 per session.
 - All thresholds are constants at the top of `__init__.py`.
 
 ## Matching v2 (since 1.1.0)

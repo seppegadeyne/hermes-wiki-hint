@@ -24,7 +24,7 @@ import threading
 
 WIKI_FALLBACK = os.path.expanduser("~/wiki")
 RESEARCH_TOOLS = {"web_search", "web_extract", "browser_exec", "session_search"}
-NUDGE_THRESHOLD = 5          # research calls before the save nudge fires
+NUDGE_THRESHOLD = 3          # research calls before the save nudge fires
 MAX_NUDGES_PER_SESSION = 3
 MAX_INJECT_MATCHES = 3
 MAX_LINE_CHARS = 220         # truncation per injected index line
