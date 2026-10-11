@@ -26,6 +26,7 @@ WIKI_FALLBACK = os.path.expanduser("~/wiki")
 RESEARCH_TOOLS = {"web_search", "web_extract", "browser_exec", "session_search"}
 NUDGE_THRESHOLD = 3          # research calls before the save nudge fires
 MAX_NUDGES_PER_SESSION = 3
+CRON_SESSION_PREFIX = "cron_"  # Hermes cron sessions are named cron_<jobid>_<date>
 MAX_INJECT_MATCHES = 3
 MAX_LINE_CHARS = 220         # truncation per injected index line
 MIN_WORD_LEN = 3             # shorter (sub)words are noise
@@ -214,6 +215,23 @@ def _post_tool_call(tool_name, args=None, session_id=None, **kwargs):
             st["pending"] = True
 
 
+def _is_cron(session_id, platform=None):
+    return str(session_id or "").startswith(CRON_SESSION_PREFIX) or str(platform or "") == "cron"
+
+
+def _cron_instruction(wiki):
+    return (
+        f"[wiki-hint] Dit is een geplande (cron) run. Er staat een llm-wiki onder {wiki}. "
+        "Rond je taak EERST volledig af. Beoordeel daarna kort of er duurzame feiten of "
+        "beslissingen zijn die een volgende run of een andere agent nodig heeft (bevestigde "
+        "bevindingen, ontdekte valkuilen, werkende recepten, gemaakte keuzes met reden). "
+        "Zo ja: leg ze beknopt vast volgens de llm-wiki skill (oriënteer via SCHEMA.md/index.md, "
+        "werk de juiste concept/entity/query-pagina bij of maak er één, werk index.md en log.md bij; "
+        "geen dubbele pagina's). Nooit persoonsgegevens, secrets, tokens of ruwe tool-output; "
+        "geen run-logboek of status die al in GitHub/Fizzy staat. Zo nee: schrijf niets en meld hier niets over."
+    )
+
+
 def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     wiki = _wiki_path()
     if not wiki:
@@ -247,6 +265,9 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
             "notities maakt. Duurzame bevindingen schrijf je proactief weg naar "
             "de wiki (llm-wiki skill), niet alleen in het antwoord."
         )
+
+    if is_first_turn and _is_cron(session_id, kwargs.get("platform")):
+        parts.append(_cron_instruction(wiki))
 
     # Page suggestions on every turn (including the first) with a relevant question
     entries = _index_entries(wiki)

@@ -49,3 +49,12 @@ This plugin exists as two deliberately different copies:
 - Multimodal user_messages (list-of-parts) are flattened to text.
 - Page matches fire on EVERY turn (first included) with a relevant question;
   trivial questions stay injection-free.
+
+## Cron mode (since 1.2.0)
+
+- `_is_cron` recognises cron sessions by the `cron_` session-id prefix or
+  `platform == "cron"`; `_cron_instruction` is injected on the first turn only.
+- Keep the instruction short and silent-by-default: finish the task first, only
+  record durable facts, never personal data, secrets or run logs.
+- Do not add wiki lines to individual cron prompts; this hook is the single
+  place for that behaviour.

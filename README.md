@@ -33,6 +33,12 @@ Two lifecycle hooks, no tools:
       the charger page without generic words injecting noise.
     - Injects up to 3 matching page lines (truncated to 220 chars each);
     trivial questions ("capital of France") inject nothing.
+  - *First turn of a cron session* (session id starts with `cron_`, or
+    platform is `cron`): injects a one-time instruction to finish the task
+    first and then record durable facts/decisions in the wiki via the
+    llm-wiki skill (no personal data, secrets or run logs; silent when
+    there is nothing worth saving). This keeps the behaviour central, so
+    individual cron prompts need no wiki lines.
 - **`post_tool_call`** (observer): counts research tool calls
   (`web_search`, `web_extract`, `browser_exec`, `session_search`) per session.
   Every 3rd call arms a one-shot nudge in the next turn: "evaluate NOW
