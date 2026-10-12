@@ -41,7 +41,7 @@ Two lifecycle hooks, no tools:
     individual cron prompts need no wiki lines.
 - **`post_tool_call`** (observer): counts research tool calls
   (`web_search`, `web_extract`, `browser_exec`, `session_search`) per session.
-  Every 3rd call arms a one-shot nudge in the next turn: "evaluate NOW
+  Every Nth call (default 3, configurable) arms a one-shot nudge in the next turn: "evaluate NOW
   whether durable findings should be saved to the wiki, following the
   llm-wiki skill". Max 3 nudges per session, so it never becomes noise.
 
@@ -49,46 +49,40 @@ The plugin **never writes to the wiki**. It only injects context; the agent
 does the actual filing through its normal wiki workflow (raw source + sha256,
 entity/concept page, index.md + log.md updates).
 
-## Install
+## Install and update
 
 ```bash
-git clone https://github.com/seppegadeyne/hermes-wiki-hint.git
-mkdir -p ~/.hermes/plugins/wiki-hint
-cp hermes-wiki-hint/plugin.yaml hermes-wiki-hint/__init__.py ~/.hermes/plugins/wiki-hint/
+hermes plugins install seppegadeyne/hermes-wiki-hint --enable
+hermes plugins check-updates      # is there newer code on GitHub?
+hermes plugins update wiki-hint   # pull it
 ```
 
-Then enable it in `~/.hermes/config.yaml` (per profile too, if you use
-profiles):
+Already have a self-cloned copy in `~/.hermes/plugins/wiki-hint`? Run
+`hermes plugins adopt wiki-hint` to make it a tracked git install.
 
-```yaml
-plugins:
-  enabled:
-    - wiki-hint
-```
-
-Validate with the built-in plugin doctor:
-
-```bash
-hermes plugins doctor ~/.hermes/plugins/wiki-hint --ci
-```
-
-Restart any running gateway so the hooks load.
+Hooks load on a new session / gateway restart, so restart any running gateway
+after install or update. Validate with
+`hermes plugins doctor ~/.hermes/plugins/wiki-hint --ci`.
 
 ## Configuration
 
-- Wiki root resolution: `$WIKI_PATH` (if set and an existing directory),
-  otherwise `~/wiki`. Edit `WIKI_FALLBACK` in `__init__.py` to change it.
-- Tunables at the top of `__init__.py`:
-  - `NUDGE_THRESHOLD = 3` — research calls between save nudges
-  - `MAX_NUDGES_PER_SESSION = 3`
-  - `MAX_INJECT_MATCHES = 3` — max wiki pages injected per turn
-  - `MAX_LINE_CHARS = 220` — injected index-line truncation
-  - `MIN_OVERLAP = 2` / `RARE_DF_MAX = 3` — page match threshold, and the
-    document frequency under which a single rare term counts as a match
-  - `MIN_WORD_LEN`, `FUZZY_PREFIX`, `MIN_SUBSTR_LEN` — tokenizer/matcher
-    knobs (hyphen splitting, prefix tolerance, substring containment). A
-    single-term match additionally requires the term to appear in the page
-    slug itself, not only in the index summary.
+Everything is configured through environment variables (for example in
+`~/.hermes/.env`, or a profile's `.env`); the same code runs on every install.
+
+- `WIKI_PATH`: wiki root (an existing directory; `~` and quotes are handled).
+  Default: `~/wiki`.
+- `WIKI_HINT_LANG`: language of the injected texts, `en` (default) or `nl`.
+- `WIKI_HINT_NUDGE_THRESHOLD`: research calls between save nudges
+  (default `3`).
+
+Further tunables are constants at the top of `__init__.py`:
+`MAX_NUDGES_PER_SESSION`, `MAX_INJECT_MATCHES`, `MAX_LINE_CHARS`,
+`MIN_OVERLAP` / `RARE_DF_MAX`, `COMMON_DF_FRACTION` / `COMMON_DF_MIN` (terms
+that are very frequent in the index count towards the score but never carry a
+match alone), `MIN_WORD_LEN`, `FUZZY_PREFIX`, `MIN_SUBSTR_LEN`,
+`MAX_TRACKED_SESSIONS`. A match additionally requires at least one specific
+term in the page slug itself, not only in the index summary. A page line shown
+once in a session is not injected again (Hermes replays earlier injections).
 
 Injected context is appended to the user message (not the system prompt), so
 prompt caching stays intact, and Hermes spills anything over 10k chars to a
