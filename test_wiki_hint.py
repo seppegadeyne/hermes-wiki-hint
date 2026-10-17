@@ -68,7 +68,8 @@ class Base(unittest.TestCase):
             f.write(INDEX)
         self.m.WIKI_FALLBACK = os.path.join(self.tmp, "missing-fallback")
         self._saved = {k: os.environ.pop(k, None) for k in
-                       ("WIKI_PATH", "WIKI_HINT_LANG", "WIKI_HINT_NUDGE_THRESHOLD")}
+                       ("WIKI_PATH", "WIKI_HINT_LANG", "WIKI_HINT_NUDGE_THRESHOLD", "WIKI_HINT_SKIP_SOURCES",
+                        "HERMES_SESSION_SOURCE")}
         os.environ["WIKI_PATH"] = self.wiki
 
     def tearDown(self):
@@ -297,6 +298,33 @@ class Robustness(Base):
         for bad in ("0", "-2", "abc", ""):
             os.environ["WIKI_HINT_NUDGE_THRESHOLD"] = bad
             self.assertEqual(self.m._nudge_threshold(), 3)
+
+    def test_subagents_and_tool_runs_get_nothing(self):
+        for platform in ("subagent", "tool"):
+            self.assertEqual(self.call("De laadpaal doet raar", first=True, platform=platform), "")
+        os.environ["HERMES_SESSION_SOURCE"] = "tool"  # hermes chat --source tool
+        self.assertEqual(self.call("De laadpaal doet raar", first=True, platform="cli"), "")
+        os.environ.pop("HERMES_SESSION_SOURCE")
+        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", first=True, platform="cli"))
+
+    def test_skip_sources_can_be_changed_or_emptied(self):
+        os.environ["WIKI_HINT_SKIP_SOURCES"] = ""
+        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", platform="subagent"))
+        os.environ["WIKI_HINT_SKIP_SOURCES"] = "telegram, cron"
+        self.assertEqual(self.call("De laadpaal doet raar", sid="s2", platform="telegram"), "")
+        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", sid="s3", platform="subagent"))
+
+    def test_system_notes_get_no_page_suggestions(self):
+        for note in ("[IMPORTANT: Background process proc_1 completed. laadpaal",
+                     "[CONTEXT COMPACTION — REFERENCE ONLY] laadpaal",
+                     "  [SYSTEM: laadpaal"):
+            self.assertNotIn("newmotion-laadpaal", self.call(note, sid=note))
+        # the cron wrapper message keeps the reminder and the cron instruction
+        out = self.call("[IMPORTANT: You are running as a scheduled cron job. laadpaal", first=True,
+                        sid="cron_abc_20261017_000000")
+        self.assertIn("[wiki-hint]", out)
+        self.assertNotIn("newmotion-laadpaal", out)
+        self.assertEqual(out.count("[wiki-hint]"), 2)
 
     def test_no_private_paths_in_source(self):
         with open(os.path.join(HERE, "__init__.py"), encoding="utf-8") as f:

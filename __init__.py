@@ -14,6 +14,14 @@ variables (e.g. in ~/.hermes/.env), never by editing this file:
 - WIKI_PATH                   wiki root (default: ~/wiki)
 - WIKI_HINT_LANG              language of injected texts: "en" (default) or "nl"
 - WIKI_HINT_NUDGE_THRESHOLD   research calls between save nudges (default: 3)
+- WIKI_HINT_SKIP_SOURCES      comma-separated session sources that get no hints
+                              (default: "subagent,tool")
+
+Quiet where a hint cannot help: delegated subagents (platform "subagent") and
+scripted runs started with `hermes chat --source tool` get nothing, because they
+neither read nor save wiki pages. Messages the harness writes itself (a finished
+background process, a context-compaction summary, the cron job wrapper) get no
+page suggestions; the first-turn reminder and the cron instruction still apply.
 
 Matching v2: tokens are split on hyphens (wiki slugs such as
 "pool-build-quote" count as the separate words pool/build/quote) and compared
@@ -45,6 +53,10 @@ COMMON_DF_FRACTION = 0.12    # word in > this share of the index = generic
 COMMON_DF_MIN = 15           # ... but never below this page count (small wikis)
 MAX_TRACKED_SESSIONS = 256   # per-session state is bounded (oldest dropped)
 DEFAULT_LANG = "en"
+DEFAULT_SKIP_SOURCES = "subagent,tool"
+# Messages the harness writes itself start with one of these tags. Matching their wording
+# against the index only produces noise; a real user message never starts this way.
+SYSTEM_NOTE_RE = re.compile(r"^\s*\[(?:IMPORTANT|SYSTEM|CONTEXT COMPACTION)\b")
 
 MESSAGES = {
     "en": {
@@ -122,6 +134,26 @@ def _lang():
 
 def _msg(key, **kw):
     return MESSAGES[_lang()][key].format(**kw)
+
+
+def _skip_sources():
+    raw = os.environ.get("WIKI_HINT_SKIP_SOURCES")
+    if raw is None:
+        raw = DEFAULT_SKIP_SOURCES
+    return {s.strip().lower() for s in raw.strip().strip("\"'").split(",") if s.strip()}
+
+
+def _skipped(platform):
+    """True for a session whose source gets no hints (platform, or the --source of a one-shot run)."""
+    skip = _skip_sources()
+    if not skip:
+        return False
+    sources = {str(platform or "").strip().lower(), os.environ.get("HERMES_SESSION_SOURCE", "").strip().lower()}
+    return bool(sources & skip)
+
+
+def _is_system_note(text):
+    return bool(SYSTEM_NOTE_RE.match(text or ""))
 
 
 def _nudge_threshold():
@@ -352,6 +384,8 @@ def _cron_instruction(wiki):
 
 
 def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
+    if _skipped(kwargs.get("platform")):
+        return None
     wiki = _wiki_path()
     if not wiki:
         return None
@@ -378,7 +412,8 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     # so lines already shown this session are left out. A failure here must not
     # take the reminder / cron instruction down with it.
     try:
-        matches = _best_matches(user_message, _index_entries(wiki))
+        text = _flatten_message(user_message)
+        matches = [] if _is_system_note(text) else _best_matches(text, _index_entries(wiki))
     except Exception:
         matches = []
     if matches:

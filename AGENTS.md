@@ -12,6 +12,9 @@ environment variables, never in edits to `__init__.py`:
 - `WIKI_PATH`: wiki root (default `~/wiki`).
 - `WIKI_HINT_LANG`: `en` (default) or `nl`; texts live in `MESSAGES`.
 - `WIKI_HINT_NUDGE_THRESHOLD`: research calls between nudges (default 3).
+- `WIKI_HINT_SKIP_SOURCES`: session sources without hints (default
+  `subagent,tool`; matched against the hook's `platform` and
+  `HERMES_SESSION_SOURCE`).
 
 Rules:
 - No private paths, hostnames or names in code, comments, tests or docs.
@@ -60,6 +63,14 @@ Rules:
 - Multimodal user messages (list of parts) are flattened to text.
 - Page matches fire on EVERY turn (first included) with a relevant question;
   trivial questions stay injection-free.
+
+## Quiet sources and system notes (since 1.4.0)
+
+- Measured on real sessions: subagents and `--source tool` runs read 0 of the
+  pages they were shown and never saved to the wiki, while they took ~35% of
+  the injected text. They are skipped by default.
+- Harness-written messages (`[IMPORTANT`, `[SYSTEM`, `[CONTEXT COMPACTION`)
+  get no page matches: their wording is not a user question.
 
 ## Cron mode (since 1.2.0)
 

@@ -74,6 +74,15 @@ Everything is configured through environment variables (for example in
 - `WIKI_HINT_LANG`: language of the injected texts, `en` (default) or `nl`.
 - `WIKI_HINT_NUDGE_THRESHOLD`: research calls between save nudges
   (default `3`).
+- `WIKI_HINT_SKIP_SOURCES`: comma-separated session sources that get no hints
+  (default `subagent,tool`). Delegated subagents and scripted
+  `hermes chat --source tool` runs never read or save wiki pages, so a hint
+  there only costs tokens. Set it to an empty value to hint everywhere.
+
+Messages the harness writes itself (a finished background process, a context
+compaction summary, the cron job wrapper; they start with `[IMPORTANT`,
+`[SYSTEM` or `[CONTEXT COMPACTION`) get no page suggestions. The first-turn
+reminder and the cron instruction still apply.
 
 Further tunables are constants at the top of `__init__.py`:
 `MAX_NUDGES_PER_SESSION`, `MAX_INJECT_MATCHES`, `MAX_LINE_CHARS`,
