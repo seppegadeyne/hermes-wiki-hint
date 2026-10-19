@@ -28,11 +28,14 @@ Two lifecycle hooks, no tools:
     - Prefix-tolerant comparison catches inflected forms (pump/pumps,
       cheap/cheaper) and loose words match inside compounds
       (pump in "sandfilterpump").
-    - One overlapping term suffices when it is rare across the index
-      (document frequency <= 3 pages), so "the charger acts weird" finds
-      the charger page without generic words injecting noise.
+    - At least two specific terms must overlap. A single shared word, even a
+      rare one, is a coincidence: measured on real sessions such lines were
+      read 1 time in 108.
+    - Image descriptions that Hermes prepends to a message
+      (`[The user attached an image. ...]`) are not matched; only the words
+      the user typed count.
     - Injects up to 3 matching page lines (truncated to 220 chars each);
-    trivial questions ("capital of France") inject nothing.
+      trivial questions ("capital of France") inject nothing.
   - *First turn of a cron session* (session id starts with `cron_`, or
     platform is `cron`): injects a one-time instruction to finish the task
     first and then record durable facts/decisions in the wiki via the
@@ -40,8 +43,9 @@ Two lifecycle hooks, no tools:
     there is nothing worth saving). This keeps the behaviour central, so
     individual cron prompts need no wiki lines.
 - **`post_tool_call`** (observer): counts research tool calls
-  (`web_search`, `web_extract`, `browser_exec`, `session_search`) per session.
-  Every Nth call (default 3, configurable) arms a one-shot nudge in the next turn: "evaluate NOW
+  (`web_search`, `web_extract`, `session_search`; a `browser_exec` step counts
+  for a quarter, since most browser calls test a page rather than research)
+  per session. Every N calls (default 3, configurable) arms a one-shot nudge in the next turn: "evaluate NOW
   whether durable findings should be saved to the wiki, following the
   llm-wiki skill". Max 3 nudges per session, so it never becomes noise.
 
@@ -86,7 +90,7 @@ reminder and the cron instruction still apply.
 
 Further tunables are constants at the top of `__init__.py`:
 `MAX_NUDGES_PER_SESSION`, `MAX_INJECT_MATCHES`, `MAX_LINE_CHARS`,
-`MIN_OVERLAP` / `RARE_DF_MAX`, `COMMON_DF_FRACTION` / `COMMON_DF_MIN` (terms
+`RESEARCH_TOOLS` (tool weights), `MIN_OVERLAP`, `COMMON_DF_FRACTION` / `COMMON_DF_MIN` (terms
 that are very frequent in the index count towards the score but never carry a
 match alone), `MIN_WORD_LEN`, `FUZZY_PREFIX`, `MIN_SUBSTR_LEN`,
 `MAX_TRACKED_SESSIONS`. A match additionally requires at least one specific

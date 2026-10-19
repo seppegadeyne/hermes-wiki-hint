@@ -89,13 +89,21 @@ class Base(unittest.TestCase):
 
 
 class Matching(Base):
-    def test_rare_single_term_matches_slug(self):
+    def test_two_terms_match_slug(self):
         self.assertIn("entities/newmotion-laadpaal-rozenlaan",
-                      self.matches("De laadpaal doet raar"))
+                      self.matches("De newmotion laadpaal doet raar"))
+
+    def test_single_shared_word_is_not_enough(self):
+        # one shared word, even a rare one that is in the slug, is a coincidence
+        self.assertEqual(self.matches("De laadpaal doet raar"), [])
+        self.assertEqual(self.matches("Welke slangen?"), [])
 
     def test_compound_and_inflection(self):
+        # filterpomp inside zandfilterpomp (compound), opzetzwembaden (inflection)
         self.assertIn("concepts/opzetzwembad",
-                      self.matches("Welke pomp voor het opzetzwembad?"))
+                      self.matches("Welke filterpomp voor het opzetzwembad?"))
+        self.assertIn("concepts/opzetzwembad",
+                      self.matches("Welke liner voor opzetzwembaden?"))
 
     def test_multi_term(self):
         got = self.matches("Polymarket btc5m bot stop-loss herzien")
@@ -114,12 +122,15 @@ class Matching(Base):
         self.m.COMMON_DF_MIN = 2
         got = self.matches("Backup service start niet op de workstation")
         self.assertNotIn("queries/workstation-gpu-mining-tuning", got)
-        self.assertIn("concepts/workstation-home-config-backup", got)
+        # generic "workstation" plus one specific term is still one specific term
+        self.assertEqual(got, [])
+        got = self.matches("Encrypted backup van de workstation config start niet")
+        self.assertEqual(got[0], "concepts/workstation-home-config-backup")
+        self.assertNotIn("queries/workstation-gpu-mining-tuning", got)
 
     def test_hyphenated_query_word_not_double_counted(self):
-        # Disable the rare-single-term path (in this tiny index "self" is rare)
-        # so only the double count ("self-host" + "self") could admit Coolify.
-        self.m.RARE_DF_MAX = 0
+        # Only the double count ("self-host" + "self") could give Coolify a
+        # second specific term.
         got = self.matches("Is Turso free to self-host?")
         self.assertEqual(got[0], "concepts/turso-selfhost")
         self.assertNotIn("concepts/coolify-self-hosted-runners", got)
@@ -135,9 +146,47 @@ class Matching(Base):
 
 class Multimodal(Base):
     def test_list_of_parts_is_flattened(self):
-        msg = [{"type": "text", "text": "De laadpaal doet raar"},
+        msg = [{"type": "text", "text": "De newmotion laadpaal doet raar"},
                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]
         self.assertIn("newmotion-laadpaal-rozenlaan", self.call(msg))
+
+    def test_image_description_is_not_matched(self):
+        # cli and gateway prepend a vision description; only the user's own words count
+        cli = ("[The user attached an image. Here's what it contains:\n"
+               "A Polymarket btc5m bot dashboard with a stop-loss review panel.]\n"
+               "[If you need a closer look, use vision_analyze with image_url: /tmp/x.png]\n\n")
+        gw = ("[The user sent an image~ Here's what I can see:\n"
+              "A Polymarket btc5m bot dashboard with a stop-loss review panel.]\n"
+              "[If you need a closer look, use vision_analyze with image_url: /tmp/x.png ~]\n\n")
+        gw_fail = ("[The user sent an image but I couldn't quite see it this time (>_<) You can try looking "
+                   "at it yourself with vision_analyze using image_url: /tmp/polymarket-btc5m.png]\n\n")
+        for prefix in (cli, gw, gw_fail):
+            self.assertNotIn("polymarket", self.call(prefix + "Kijk hier eens naar", sid=prefix))
+            self.assertIn("newmotion-laadpaal",
+                          self.call(prefix + "De newmotion laadpaal doet raar", sid=prefix + "2"))
+
+    def test_image_description_edge_cases(self):
+        tail = "De newmotion laadpaal doet raar"
+        cases = (
+            # description with "]" inside (code, markdown)
+            "[The user attached an image. Here's what it contains:\nPolymarket code: a[0] = btc5m]\n"
+            "[If you need a closer look, use vision_analyze with image_url: /tmp/x.png]\n\n",
+            # tui format
+            "[The user attached an image: polymarket-btc5m.png]\n"
+            "[Examine it with the vision_analyze tool using image_url: /tmp/polymarket-btc5m.png]\n\n",
+            # failure note with multi-line exception text containing "]", then a success block
+            "[The user attached an image but analysis failed (polymarket\nbtc5m [rate] limit). You can try "
+            "examining it with vision_analyze using image_url: /tmp/a.png]\n\n"
+            "[The user attached an image. Here's what it contains:\nPolymarket btc5m bot]\n"
+            "[If you need a closer look, use vision_analyze with image_url: /tmp/b.png]\n\n",
+        )
+        for i, prefix in enumerate(cases):
+            stripped = self.m._strip_attachments(prefix + tail)
+            self.assertNotIn("btc5m", stripped)
+            self.assertIn(tail, stripped)
+            out = self.call(prefix + tail, sid=f"edge{i}")
+            self.assertIn("newmotion-laadpaal", out)
+            self.assertNotIn("polymarket", out)
 
     def test_odd_inputs_never_raise(self):
         for msg in (None, 42, {"x": 1}, [None, {"text": None}, {"text": 5}], b"bytes", ""):
@@ -178,6 +227,18 @@ class Nudge(Base):
         self.assertTrue(self.nudged())
         self.assertFalse(self.nudged())  # one-shot
 
+    def test_browser_steps_count_for_a_quarter(self):
+        # clicking through a page while testing it is not research
+        self.research(self.m._nudge_threshold() * 4 - 1, tool="browser_exec")
+        self.assertFalse(self.nudged())
+        self.research(1, tool="browser_exec")
+        self.assertTrue(self.nudged())
+        # mixed: weights add up, one nudge per threshold crossed
+        self.research(self.m._nudge_threshold() - 1, sid="m")
+        self.research(4, sid="m", tool="browser_exec")
+        self.assertTrue(self.nudged(sid="m"))
+        self.assertFalse(self.nudged(sid="m"))
+
     def test_non_research_tools_ignored(self):
         self.research(self.m._nudge_threshold() * 2, tool="terminal")
         self.assertFalse(self.nudged())
@@ -206,9 +267,9 @@ class Nudge(Base):
 
 class Dedup(Base):
     def test_same_page_not_repeated_within_session(self):
-        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar"))
-        self.assertNotIn("newmotion-laadpaal", self.call("En die laadpaal nu?"))
-        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", sid="other"))
+        self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar"))
+        self.assertNotIn("newmotion-laadpaal", self.call("En die newmotion laadpaal nu?"))
+        self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", sid="other"))
 
 
 class State(Base):
@@ -216,7 +277,7 @@ class State(Base):
         cap = self.m.MAX_TRACKED_SESSIONS
         for i in range(cap * 3):
             self.m._post_tool_call("web_search", session_id=f"cron_{i}")
-            self.call("De laadpaal doet raar", sid=f"cron_{i}")
+            self.call("De newmotion laadpaal doet raar", sid=f"cron_{i}")
         self.assertLessEqual(len(self.m._session_state), cap)
 
     def test_plain_turns_create_no_state(self):
@@ -232,11 +293,11 @@ class Robustness(Base):
 
     def test_empty_index(self):
         open(os.path.join(self.wiki, "index.md"), "w").close()
-        self.assertEqual(self.call("De laadpaal doet raar"), "")
+        self.assertEqual(self.call("De newmotion laadpaal doet raar"), "")
 
     def test_invalid_utf8_index(self):
         with open(os.path.join(self.wiki, "index.md"), "wb") as f:
-            f.write(b"- [[concepts/laadpaal-x]] \xff\xfe laadpaal\n")
+            f.write(b"- [[concepts/laadpaal-kapot]] \xff\xfe laadpaal\n")
         ctx = self.call("laadpaal kapot", first=True, sid="cron_j_1")
         self.assertEqual(ctx.count("[wiki-hint]"), 3)
 
@@ -270,7 +331,7 @@ class Robustness(Base):
     def test_hint_never_writes_to_wiki(self):
         before = sorted(os.listdir(self.wiki))
         self.m._post_tool_call("web_search", session_id="s")
-        self.call("De laadpaal doet raar", first=True, sid="cron_x_1", platform="cron")
+        self.call("De newmotion laadpaal doet raar", first=True, sid="cron_x_1", platform="cron")
         self.assertEqual(sorted(os.listdir(self.wiki)), before)
 
     def test_register(self):
@@ -301,18 +362,18 @@ class Robustness(Base):
 
     def test_subagents_and_tool_runs_get_nothing(self):
         for platform in ("subagent", "tool"):
-            self.assertEqual(self.call("De laadpaal doet raar", first=True, platform=platform), "")
+            self.assertEqual(self.call("De newmotion laadpaal doet raar", first=True, platform=platform), "")
         os.environ["HERMES_SESSION_SOURCE"] = "tool"  # hermes chat --source tool
-        self.assertEqual(self.call("De laadpaal doet raar", first=True, platform="cli"), "")
+        self.assertEqual(self.call("De newmotion laadpaal doet raar", first=True, platform="cli"), "")
         os.environ.pop("HERMES_SESSION_SOURCE")
-        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", first=True, platform="cli"))
+        self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", first=True, platform="cli"))
 
     def test_skip_sources_can_be_changed_or_emptied(self):
         os.environ["WIKI_HINT_SKIP_SOURCES"] = ""
-        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", platform="subagent"))
+        self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", platform="subagent"))
         os.environ["WIKI_HINT_SKIP_SOURCES"] = "telegram, cron"
-        self.assertEqual(self.call("De laadpaal doet raar", sid="s2", platform="telegram"), "")
-        self.assertIn("newmotion-laadpaal", self.call("De laadpaal doet raar", sid="s3", platform="subagent"))
+        self.assertEqual(self.call("De newmotion laadpaal doet raar", sid="s2", platform="telegram"), "")
+        self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", sid="s3", platform="subagent"))
 
     def test_system_notes_get_no_page_suggestions(self):
         for note in ("[IMPORTANT: Background process proc_1 completed. laadpaal",

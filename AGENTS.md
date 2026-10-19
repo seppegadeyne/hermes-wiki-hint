@@ -39,7 +39,8 @@ Rules:
 - The plugin NEVER writes to the wiki itself; context injection via
   `pre_llm_call` and observation via `post_tool_call` only.
 - Injection stays short: max 3 index lines, each truncated to 220 chars.
-- Save nudge: every N research calls (default 3), max 3 per session.
+- Save nudge: every N research calls (default 3; weighted, see
+  RESEARCH_TOOLS), max 3 per session.
 - Tunables are constants at the top of `__init__.py`; per-install settings
   are the env vars above.
 
@@ -50,9 +51,9 @@ Rules:
 - `_fuzzy_eq`: equal, prefix-tolerant (pump/pumps), or substring containment
   (pump in sandfilterpump).
 - `_best_matches`: terms in > COMMON_DF_FRACTION (12%, min COMMON_DF_MIN=15
-  pages) of the index are generic: they score but never carry a match; at
-  least one specific term must be in the slug; threshold 2 specific terms OR
-  1 rare term (document frequency <= RARE_DF_MAX). A hyphenated query word
+  pages) of the index are generic: they score but never carry a match;
+  at least one specific term must be in the slug; threshold 2 specific terms
+  (the 1-rare-term path was removed in 1.5.0: read 1/108). A hyphenated query word
   does not double-count with its parts. Duplicate index lines are removed.
   Deterministic order via a sorted match-key tiebreaker.
 - A page line already shown in a session is not shown again (Hermes replays
@@ -71,6 +72,16 @@ Rules:
   the injected text. They are skipped by default.
 - Harness-written messages (`[IMPORTANT`, `[SYSTEM`, `[CONTEXT COMPACTION`)
   get no page matches: their wording is not a user question.
+
+## Image descriptions and browser weight (since 1.5.0)
+
+- `[The user attached/sent an image ...]` blocks (vision descriptions written
+  by cli/gateway) are stripped before matching; the user's own text matches.
+- Save-nudge counting is weighted (`RESEARCH_TOOLS`): browser_exec = 0.25,
+  because browser steps are mostly page QA, not research.
+- Measure before tuning: replay real sessions (pages shown vs read later,
+  nudges armed) against the old and the new code; keep a change only when it
+  drops noise without losing lines that were actually read.
 
 ## Cron mode (since 1.2.0)
 

@@ -28,9 +28,13 @@ Matching v2: tokens are split on hyphens (wiki slugs such as
 prefix-tolerantly, so inflected forms (pump/pumps) match. Loose words also match
 inside compounds (pump in sandfilterpump). Generic terms (very frequent in the
 index) add to the score but never carry a match alone; at least one specific
-term must appear in the page slug. A single overlapping term suffices when it
-is rare in the index (document frequency <= RARE_DF_MAX). Multimodal user
-messages (list of parts) are flattened instead of ignored.
+term must appear in the page slug, and at least MIN_OVERLAP specific terms
+must overlap (one shared word is a coincidence, not a topic). Multimodal user
+messages (list of parts) are flattened instead of ignored; image descriptions
+that Hermes prepends to the user's text are not matched.
+
+The save nudge counts research tools by weight: a browser step counts for a
+quarter, since most browser calls are page tests rather than research.
 """
 
 import os
@@ -38,7 +42,9 @@ import re
 import threading
 
 WIKI_FALLBACK = os.path.expanduser("~/wiki")
-RESEARCH_TOOLS = {"web_search", "web_extract", "browser_exec", "session_search"}
+# Research tools and their weight towards the save nudge. One browser step is usually one of
+# many clicks while testing a page (QA, not research), so it counts for a quarter.
+RESEARCH_TOOLS = {"web_search": 1.0, "web_extract": 1.0, "session_search": 1.0, "browser_exec": 0.25}
 DEFAULT_NUDGE_THRESHOLD = 3  # research calls before the save nudge
 MAX_NUDGES_PER_SESSION = 3
 CRON_SESSION_PREFIX = "cron_"  # Hermes cron sessions are named cron_<jobid>_<date>
@@ -48,7 +54,6 @@ MIN_WORD_LEN = 3             # shorter (sub)words are noise
 MIN_OVERLAP = 2              # content terms that must overlap
 FUZZY_PREFIX = 5             # common prefix length for fuzzy matching
 MIN_SUBSTR_LEN = 6           # min length for substring matching
-RARE_DF_MAX = 3              # word in <= this many index pages = rare
 COMMON_DF_FRACTION = 0.12    # word in > this share of the index = generic
 COMMON_DF_MIN = 15           # ... but never below this page count (small wikis)
 MAX_TRACKED_SESSIONS = 256   # per-session state is bounded (oldest dropped)
@@ -57,6 +62,15 @@ DEFAULT_SKIP_SOURCES = "subagent,tool"
 # Messages the harness writes itself start with one of these tags. Matching their wording
 # against the index only produces noise; a real user message never starts this way.
 SYSTEM_NOTE_RE = re.compile(r"^\s*\[(?:IMPORTANT|SYSTEM|CONTEXT COMPACTION)\b")
+# Hermes prepends a vision model's description of an attached image to the user's text. That
+# description is long and generic ("analysis", "provided", "page") and matched random pages;
+# only the user's own words are matched. Full block first (the description may contain "]"),
+# then failure notes, which can carry multi-line exception text but always end in "image_url: ...]".
+# If Hermes changes the format, nothing is stripped (fails open, as before 1.5.0).
+ATTACHMENT_BLOCK_RE = re.compile(
+    r"\[The user (?:attached|sent) an image.*?\]\s*\[(?:If you need a closer look|Examine it)[^\]]*\]",
+    re.S)
+ATTACHMENT_NOTE_RE = re.compile(r"\[The user (?:attached|sent) an image.*?image_url:[^\]\n]*\]", re.S)
 
 MESSAGES = {
     "en": {
@@ -154,6 +168,12 @@ def _skipped(platform):
 
 def _is_system_note(text):
     return bool(SYSTEM_NOTE_RE.match(text or ""))
+
+
+def _strip_attachments(text):
+    """Drop harness-written image descriptions, keep what the user typed."""
+    text = ATTACHMENT_BLOCK_RE.sub(" ", text or "")
+    return ATTACHMENT_NOTE_RE.sub(" ", text)
 
 
 def _nudge_threshold():
@@ -305,8 +325,9 @@ def _best_matches(user_message, entries):
       score but cannot carry a match.
     - At least one specific term must be in the page slug itself: a hit only
       in the summary is too weak.
-    - Specific overlap >= MIN_OVERLAP, or 1 rare term
-      (document frequency <= RARE_DF_MAX).
+    - Specific overlap >= MIN_OVERLAP. A single shared word, however rare, is
+      not enough: measured on real sessions such lines were almost never read.
+      (A hyphenated compound such as "stop-loss" counts as its parts.)
     - A compound query word ("self-host") does not double-count next to its
       own parts ("self", "host")."""
     q = _tokenize(user_message or "")
@@ -331,9 +352,9 @@ def _best_matches(user_message, entries):
     scored = []
     for matched, slug_tokens, line in hit_lists:
         specific = [w for w in matched if df[w] <= common_df]
-        if not any(_fuzzy_eq(w, v) for w in specific for v in slug_tokens):
+        if len(specific) < MIN_OVERLAP:
             continue
-        if len(specific) < MIN_OVERLAP and df[specific[0]] > RARE_DF_MAX:
+        if not any(_fuzzy_eq(w, v) for w in specific for v in slug_tokens):
             continue
         scored.append((len(matched), " ".join(matched), line))
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -363,15 +384,15 @@ def _state(session_id, create=True):
 
 
 def _post_tool_call(tool_name, args=None, session_id=None, **kwargs):
-    if tool_name not in RESEARCH_TOOLS:
+    weight = RESEARCH_TOOLS.get(tool_name)
+    if not weight:
         return
+    threshold = _nudge_threshold()
     with _lock:
         st = _state(session_id)
-        st["count"] += 1
-        if (
-            st["count"] % _nudge_threshold() == 0
-            and st["nudges"] < MAX_NUDGES_PER_SESSION
-        ):
+        before = int(st["count"] // threshold)
+        st["count"] += weight
+        if int(st["count"] // threshold) > before and st["nudges"] < MAX_NUDGES_PER_SESSION:
             st["pending"] = True
 
 
@@ -413,7 +434,10 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     # take the reminder / cron instruction down with it.
     try:
         text = _flatten_message(user_message)
-        matches = [] if _is_system_note(text) else _best_matches(text, _index_entries(wiki))
+        if _is_system_note(text):
+            matches = []
+        else:
+            matches = _best_matches(_strip_attachments(text), _index_entries(wiki))
     except Exception:
         matches = []
     if matches:
