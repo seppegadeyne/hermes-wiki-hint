@@ -179,8 +179,9 @@ def install(args, out=print):
         out(f"Start it with: hermes cron resume {job_id}   (try it first with: hermes cron run {job_id})")
     mode = _cron_mode(p["home"])
     if mode != "approve":
-        out(f"Note: approvals.cron_mode is {mode or 'unset (deny)'}; the run needs the terminal "
-            "(memory_edit.py, tar) without a person to approve. Check that it is allowed.")
+        out(f"Note: approvals.cron_mode is {mode or 'unset (deny)'}. The upkeep's own commands (tar, "
+            "memory_edit.py, plain rm) are not flagged as dangerous, so it runs; commands Hermes flags "
+            "(heredocs, xargs rm) are refused and the run works around them.")
     for extra in existing[1:]:
         out(f"Warning: a second upkeep job {extra['id']} exists; remove it with `hermes wiki-hint upkeep remove`.")
     return 0

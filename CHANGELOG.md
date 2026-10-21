@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 (2026-10-21)
+
+- The install note on `approvals.cron_mode: deny` now says what it means: the upkeep's own commands
+  are not flagged and run; only flagged shapes (heredocs, `xargs rm`) are refused. MAINTENANCE.md
+  says to delete old backups with plain `rm`.
+
 ## 1.7.0 (2026-10-21)
 
 - `hermes wiki-hint upkeep install|status|remove`: one command per install sets up (or updates,
