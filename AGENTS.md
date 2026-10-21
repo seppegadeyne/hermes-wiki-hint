@@ -20,8 +20,9 @@ Rules:
 - No private paths, hostnames or names in code, comments, tests or docs.
   Docstrings and comments are English. Add new user-facing text to every
   language in `MESSAGES`.
-- Tests (`python3 test_wiki_hint.py`, stdlib, offline, synthetic wiki) must
-  pass; assert on markers/slugs, not on the exact injected wording.
+- Tests (`python3 test_wiki_hint.py` and `python3 test_maintenance.py`,
+  stdlib, offline, synthetic wiki and Hermes homes) must pass; assert on
+  markers/slugs, not on the exact injected wording.
 - Validate with `hermes plugins doctor <plugin-dir> --ci`.
 - Bump `version` in `plugin.yaml` on every behaviour change.
 
@@ -37,7 +38,11 @@ Rules:
 ## Behavior that must stay
 
 - The plugin NEVER writes to the wiki itself; context injection via
-  `pre_llm_call` and observation via `post_tool_call` only.
+  `pre_llm_call` and observation via `post_tool_call` only. `maintenance.py`
+  and `/wiki-audit` only read; `test_nothing_is_written` guards that.
+  `memory_edit.py` is the upkeep run's write path for memory files (flock on
+  `<file>.lock` like Hermes, exact-text matching, backups); hooks never import it. Repairs
+  belong to the scheduled run described in MAINTENANCE.md, not to plugin code.
 - Injection stays short: max 3 index lines, each truncated to 220 chars.
 - Save nudge: every N research calls (default 3; weighted, see
   RESEARCH_TOOLS), max 3 per session.
@@ -91,3 +96,15 @@ Rules:
   durable facts, never personal data, secrets or run logs.
 - Do not add wiki lines to individual cron prompts; this hook is the single
   place for that behaviour.
+
+## Upkeep audit (since 1.6.0)
+
+- `maintenance.py` is stdlib-only and read-only. Memory size is counted like
+  Hermes (`tools/memory_tool_store.py`: entries split on `\n§\n`, stripped,
+  re-joined); limits come from each home's `config.yaml` `memory:` block.
+- raw/ hashes: the body after the closing `---` line, accepted as stored or
+  without its leading blank lines (both forms exist in real vaults).
+- Code spans and fences are ignored for wikilinks (schema examples are not links).
+- Settings are env vars (`WIKI_HINT_INDEX_LINE_MAX`, `WIKI_HINT_PAGE_MAX_LINES`,
+  `WIKI_HINT_LOG_MAX_ENTRIES`, `WIKI_HINT_LOG_ROTATION`, `WIKI_HINT_ARCHIVE_GLOB`,
+  `WIKI_HINT_MAINT_HOMES`), never code edits per install.

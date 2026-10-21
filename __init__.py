@@ -7,7 +7,9 @@ Two hooks:
 - post_tool_call: counts research tool calls per session and arms the nudge.
 
 The plugin NEVER writes to the wiki itself; it only nudges the model towards
-the llm-wiki skill (orient first, raw/ + sha256, update index/log).
+the llm-wiki skill (orient first, raw/ + sha256, update index/log). The
+/wiki-audit command and maintenance.py only read (see MAINTENANCE.md for the
+scheduled upkeep that acts on their report).
 
 One codebase for every install. Behaviour is configured via environment
 variables (e.g. in ~/.hermes/.env), never by editing this file:
@@ -37,6 +39,7 @@ The save nudge counts research tools by weight: a browser step counts for a
 quarter, since most browser calls are page tests rather than research.
 """
 
+import json
 import os
 import re
 import threading
@@ -454,6 +457,41 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     return {"context": "\n\n".join(parts)}
 
 
+def _maintenance():
+    """The read-only audit module next to this file (works as a package and when loaded by path)."""
+    try:
+        from . import maintenance  # type: ignore[attr-defined]
+        return maintenance
+    except ImportError:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "wiki_hint_maintenance", os.path.join(os.path.dirname(os.path.abspath(__file__)), "maintenance.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+
+def _audit_command(raw_args="", **_kwargs):
+    """/wiki-audit: read-only health report of the wiki and this profile's memory files.
+
+    ``--all`` adds the other profiles of the install (sizes only, no entry text: the command may run
+    in a chat other people see); ``--json`` returns the raw data for this profile.
+    """
+    try:
+        m = _maintenance()
+        args = str(raw_args or "").split()
+        homes = m.hermes_homes() if "--all" in args else [m.active_home()]
+        report = m.audit(_wiki_path(), homes)
+        if "--json" in args and "--all" not in args:
+            return json.dumps(report, ensure_ascii=False, indent=1)[:60_000]
+        return m.render_text(report, entry_text="--all" not in args)
+    except Exception as exc:  # a slash command must always answer
+        return f"wiki-hint audit failed: {str(exc)[:300]}"
+
+
 def register(ctx):
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("post_tool_call", _post_tool_call)
+    if hasattr(ctx, "register_command"):
+        ctx.register_command("wiki-audit", handler=_audit_command,
+                             description="Read-only health report of the wiki and the memory files")

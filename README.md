@@ -15,7 +15,7 @@ writing anything itself.
 
 ## What it does
 
-Two lifecycle hooks, no tools:
+Two lifecycle hooks and one read-only slash command (`/wiki-audit`, see Upkeep below), no tools:
 
 - **`pre_llm_call`** (context injection):
   - *First turn of a session*: injects a short reminder that a wiki exists at
@@ -52,6 +52,29 @@ Two lifecycle hooks, no tools:
 The plugin **never writes to the wiki**. It only injects context; the agent
 does the actual filing through its normal wiki workflow (raw source + sha256,
 entity/concept page, index.md + log.md updates).
+
+## Upkeep: wiki and memory files
+
+The hooks keep the wiki in use; they do not keep it tidy. Over time index lines go stale, links
+break, pages grow past what anyone reads, and Hermes' always-loaded `MEMORY.md` / `USER.md` fill
+up until new memories are refused. Two read-only pieces help:
+
+- `maintenance.py`: an audit of the vault (index vs pages, broken wikilinks, frontmatter, tags
+  outside the `SCHEMA.md` taxonomy, page size, `log.md` rotation, `raw/` sha256 drift, orphans)
+  and of the memory files of every profile (size against the limits in each profile's
+  `config.yaml`, counted the way Hermes counts them, long entries, near-duplicates, entries naming
+  paths that no longer exist, `SOUL.md` size). `--json` for the data, `--attention` for a short
+  stable list (good for change detection).
+- `/wiki-audit` (slash command): the same report inside a session, for this profile's memory
+  files; `/wiki-audit --all` adds the other profiles (sizes only, no entry text).
+- `memory_edit.py`: the only way the upkeep run edits `MEMORY.md` / `USER.md`. It takes Hermes'
+  own file lock, matches entries by exact text (entries a live session adds meanwhile survive),
+  keeps the 4 newest backups and writes atomically.
+
+The audit and the command never write. Repairs are done by a scheduled agent run that follows
+[MAINTENANCE.md](MAINTENANCE.md): backup first, move memory detail into wiki pages and leave a
+pointer, fix the index and links, rotate the log, a limit of 15 pages per run, then re-audit and
+log what changed. MAINTENANCE.md also shows how to schedule it as a weekly Hermes cron job.
 
 ## Install and update
 
