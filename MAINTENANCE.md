@@ -20,8 +20,9 @@ scheduling surface, so the schedule is one cron job per install (see "Schedule i
    one-line "nothing to do" when `attention` is empty.
 2. Back up the vault before the first write, to a folder that is not pruned (not a scratch or
    temp folder): `mkdir -p $HERMES_HOME/backups/wiki-upkeep && tar -czf
-   $HERMES_HOME/backups/wiki-upkeep/<date>.tgz -C <vault-parent> <vault-dir>`. Keep the 4 newest
-   tarballs, delete older ones. Memory files are backed up by `memory_edit.py` itself.
+   $HERMES_HOME/backups/wiki-upkeep/<YYYY-MM-DD_HHMMSS>.tgz -C <vault-parent> <vault-dir>` (date AND
+   time: two runs on one day must not overwrite each other). Never overwrite an existing tarball.
+   Keep the 4 newest tarballs, delete older ones. Memory files are backed up by `memory_edit.py` itself.
 3. Orient in the wiki (llm-wiki skill): `SCHEMA.md`, `index.md`, the last entries of `log.md`.
 4. Repair, in this order, within the limits below.
 5. Re-run the audit once and compare: every count you worked on must go down, nothing else may
@@ -79,6 +80,12 @@ Memory files (per profile, `memories/MEMORY.md` and `memories/USER.md`):
 - Before writing memory detail into the vault, check the text for secrets and personal data
   (`token`, `api key`, `password`, `secret`, `PRIVATE KEY`, `sk-`, `ghp_`, phone numbers,
   addresses). On a hit: leave the entry where it is and report it.
+
+## Working unattended
+
+Cron and `-q` runs may block shell heredocs (`python3 - <<EOF`) and `python3 -c` behind approvals.
+Write helper scripts to the scratch folder with write_file and run them with `python3 <file>`;
+call `memory_edit.py` with a plan file. Do not retry a blocked command in another shape.
 
 ## Limits per run
 

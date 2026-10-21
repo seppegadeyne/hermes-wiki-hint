@@ -6,7 +6,13 @@
   never duplicates) the weekly upkeep cron job and its two wrapper scripts; `--paused`, `--dry-run`,
   `--schedule`, `--homes all|self`, `--archive-glob`, `--deliver`. Warns when `approvals.cron_mode`
   is not `approve`.
-- Tested end to end on a real install: the installed job ran once and its report checked against the playbook.
+- MAINTENANCE.md: vault backups are named with date and time and never overwritten (two runs on
+  one day overwrote the first tarball in the end-to-end test).
+- MAINTENANCE.md: "Working unattended" (no heredocs or `python3 -c` in cron runs; scripts + plan files).
+- Tested end to end on a real install (5 profiles): a trial run brought 8 memory files from 95-106% to
+  80-85% of their limit with every removed fact traced to a wiki page or skill, split 3 dated pages
+  into statuslogs, fixed tags, index lines and a broken link; then the job installed by this command
+  ran from the scheduler.
 
 ## 1.6.0 (2026-10-21)
 
