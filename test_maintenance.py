@@ -305,5 +305,105 @@ class MemoryEdit(unittest.TestCase):
         self.assertEqual(res["not_in_backup"], ["live session entry"])
 
 
+class FakeJobs:
+    """Stand-in for Hermes' cron.jobs (create/update/pause/get/list/remove)."""
+    def __init__(self):
+        self.jobs, self.n = {}, 0
+
+    def list_jobs(self, include_disabled=False):
+        return [dict(j) for j in self.jobs.values()]
+
+    def create_job(self, paused=False, paused_reason=None, **fields):
+        self.n += 1
+        job = dict(fields, id=f"job{self.n}", enabled=not paused)
+        self.jobs[job["id"]] = job
+        return job
+
+    def update_job(self, job_id, updates):
+        self.jobs[job_id].update(updates)
+
+    def pause_job(self, job_id, reason=None):
+        self.jobs[job_id]["enabled"] = False
+
+    def get_job(self, job_id):
+        return self.jobs.get(job_id)
+
+    def remove_job(self, job_id):
+        return self.jobs.pop(job_id, None) is not None
+
+
+class UpkeepInstall(Base):
+    def setUp(self):
+        super().setUp()
+        self.u = load("wiki_hint_upkeep_under_test", "upkeep.py")
+        self.home = os.path.join(self.tmp, "hermes")
+        os.makedirs(os.path.join(self.home, "profiles", "p1", "memories"))
+        os.makedirs(os.path.join(self.home, "memories"))
+        self.write("config.yaml", "approvals:\n  cron_mode: approve\n", root=self.home)
+        os.environ.update(HERMES_HOME=self.home, WIKI_PATH=self.wiki)
+        self.fake = FakeJobs()
+        self.u._cron = lambda: self.fake
+        self.out = []
+
+    def args(self, **kw):
+        import argparse
+        base = dict(schedule=None, wiki=None, homes=None, archive_glob=None, deliver=None, paused=False,
+                    dry_run=False, keep_scripts=False)
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    def test_plan_covers_the_install_and_quotes_paths(self):
+        p = self.u.plan(self.args(archive_glob="*-statuslog-*"))
+        self.assertEqual([os.path.basename(h) for h in p["homes"]], ["hermes", "p1"])
+        report = p["scripts"][self.u.REPORT_SCRIPT]
+        self.assertTrue(report.rstrip().endswith("maintenance.py --json")
+                        or report.rstrip().endswith("maintenance.py' --json"), report)
+        self.assertIn(f"export WIKI_PATH='{self.wiki}'", report)  # temp path has a space: quoted
+        self.assertIn("WIKI_HINT_ARCHIVE_GLOB='*-statuslog-*'", report)
+        self.assertIn("--attention", p["scripts"][self.u.MONITOR_SCRIPT])
+        self.assertEqual(p["job"]["skills"], ["llm-wiki"])
+        self.assertEqual(p["job"]["workdir"], self.wiki)
+        self.assertIn("MAINTENANCE.md", p["job"]["prompt"])
+        self.assertIn("memory_edit.py", p["job"]["prompt"])
+
+    def test_a_named_profile_defaults_to_its_own_memory_files(self):
+        os.environ["HERMES_HOME"] = os.path.join(self.home, "profiles", "p1")
+        self.assertEqual(self.u.plan(self.args())["homes"], [os.path.join(self.home, "profiles", "p1")])
+
+    def test_install_is_idempotent_and_remove_cleans_up(self):
+        self.assertEqual(self.u.install(self.args(paused=True), out=self.out.append), 0)
+        self.assertEqual(len(self.fake.jobs), 1)
+        job = next(iter(self.fake.jobs.values()))
+        self.assertFalse(job["enabled"])
+        self.assertTrue(os.access(os.path.join(self.home, "scripts", self.u.REPORT_SCRIPT), os.X_OK))
+        self.u.install(self.args(schedule="0 6 * * 0"), out=self.out.append)
+        self.assertEqual(len(self.fake.jobs), 1)
+        self.assertEqual(job["schedule"], "0 6 * * 0")
+        self.assertFalse(job["enabled"])  # reinstall keeps the pause; resuming is the operator's call
+        self.u.remove(self.args(), out=self.out.append)
+        self.assertEqual(self.fake.jobs, {})
+        self.assertFalse(os.path.exists(os.path.join(self.home, "scripts", self.u.REPORT_SCRIPT)))
+
+    def test_dry_run_writes_nothing_and_cron_mode_is_flagged(self):
+        self.u.install(self.args(dry_run=True), out=self.out.append)
+        self.assertEqual(self.fake.jobs, {})
+        self.assertFalse(os.path.exists(os.path.join(self.home, "scripts")))
+        self.write("config.yaml", "approvals:\n  cron_mode: deny\n", root=self.home)
+        self.u.install(self.args(), out=self.out.append)
+        self.assertTrue(any("cron_mode is deny" in line for line in self.out))
+
+    def test_the_wrapper_runs(self):
+        import subprocess
+        self.u.install(self.args(), out=self.out.append)
+        done = subprocess.run(["bash", os.path.join(self.home, "scripts", self.u.MONITOR_SCRIPT)],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("wiki.broken_links", done.stdout)
+
+    def test_missing_wiki_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.u.plan(self.args(wiki=os.path.join(self.tmp, "nope")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

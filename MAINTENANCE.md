@@ -92,14 +92,15 @@ Memory files (per profile, `memories/MEMORY.md` and `memories/USER.md`):
 
 ## Schedule it
 
-Create a weekly cron job with:
-- `script`: a small wrapper in `$HERMES_HOME/scripts/` that runs
-  `python3 <plugin>/maintenance.py --json` with `WIKI_PATH` set, so the report is injected as context;
+`hermes wiki-hint upkeep install [--paused]` sets it up (see README, "Turn the upkeep on"). It creates
+a weekly cron job with:
+- `script`: a wrapper in `$HERMES_HOME/scripts/` that runs `maintenance.py --json` with `WIKI_PATH`
+  and the homes to check set, so the report is injected as context;
 - `monitor`: the same wrapper with `--attention` (stable text), so a week without changes skips
   the agent run;
 - a prompt that says: follow `<plugin>/MAINTENANCE.md`, headless, no questions, report at the end,
-  and that the operator authorizes edits to `memories/` in every profile of the report;
-- `skills: [llm-wiki]`.
+  and that the operator authorizes edits to `memories/` in every home of the report;
+- `skills: [llm-wiki]`, workdir = the vault.
 
 The run needs file writes (vault) and the terminal (memory_edit.py, tar) without a person to
 approve them: check the profile's `approvals.cron_mode` before relying on it.

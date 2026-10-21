@@ -495,3 +495,29 @@ def register(ctx):
     if hasattr(ctx, "register_command"):
         ctx.register_command("wiki-audit", handler=_audit_command,
                              description="Read-only health report of the wiki and the memory files")
+    if hasattr(ctx, "register_cli_command"):
+        ctx.register_cli_command(name="wiki-hint", help="wiki-hint tools (upkeep cron job)",
+                                 setup_fn=_cli_setup, handler_fn=_cli_handle,
+                                 description="Set up the weekly wiki and memory upkeep: hermes wiki-hint upkeep install")
+
+
+def _upkeep():
+    """upkeep.py next to this file (package import or loaded by path), only for the CLI command."""
+    try:
+        from . import upkeep  # type: ignore[attr-defined]
+        return upkeep
+    except ImportError:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "wiki_hint_upkeep", os.path.join(os.path.dirname(os.path.abspath(__file__)), "upkeep.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+
+def _cli_setup(parser):
+    _upkeep().setup_parser(parser)
+
+
+def _cli_handle(args):
+    return _upkeep().handle(args)

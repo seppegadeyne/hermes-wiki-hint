@@ -99,6 +99,10 @@ Rules:
 
 ## Upkeep audit (since 1.6.0)
 
+- `upkeep.py` backs the `hermes wiki-hint upkeep` CLI command (register_cli_command). It is the only
+  place that creates cron jobs; it finds its job by the report script name, so install stays
+  idempotent. Tests replace its `_cron()` with a fake job store; never touch a real jobs.json in tests.
+
 - `maintenance.py` is stdlib-only and read-only. Memory size is counted like
   Hermes (`tools/memory_tool_store.py`: entries split on `\n§\n`, stripped,
   re-joined); limits come from each home's `config.yaml` `memory:` block.

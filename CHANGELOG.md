@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 (2026-10-21)
+
+- `hermes wiki-hint upkeep install|status|remove`: one command per install sets up (or updates,
+  never duplicates) the weekly upkeep cron job and its two wrapper scripts; `--paused`, `--dry-run`,
+  `--schedule`, `--homes all|self`, `--archive-glob`, `--deliver`. Warns when `approvals.cron_mode`
+  is not `approve`.
+- Tested end to end on a real install: the installed job ran once and its report checked against the playbook.
+
 ## 1.6.0 (2026-10-21)
 
 - Upkeep audit: `maintenance.py` and the `/wiki-audit` slash command report, read-only, on the

@@ -74,7 +74,40 @@ up until new memories are refused. Two read-only pieces help:
 The audit and the command never write. Repairs are done by a scheduled agent run that follows
 [MAINTENANCE.md](MAINTENANCE.md): backup first, move memory detail into wiki pages and leave a
 pointer, fix the index and links, rotate the log, a limit of 15 pages per run, then re-audit and
-log what changed. MAINTENANCE.md also shows how to schedule it as a weekly Hermes cron job.
+log what changed.
+
+### Turn the upkeep on (once per install)
+
+Hermes plugins cannot schedule jobs themselves, so the upkeep is an ordinary cron job. One command
+sets it up in the profile you run it in:
+
+```bash
+hermes wiki-hint upkeep install --paused        # create it paused, look at it first
+hermes cron run <job_id>                        # optional trial run
+hermes cron resume <job_id>                     # start the weekly schedule
+```
+
+`install` writes two small wrappers into the profile's `scripts/` folder (the audit as JSON for
+the agent, and the short `--attention` list as change monitor, so a week without changes costs no
+agent run) and creates the job: Sunday 05:30, skill `llm-wiki`, workdir = the vault, delivery
+`local`. Running it again updates the same job (it never makes a second one), keeps a pause, and
+picks up new settings. The wrappers call `maintenance.py` of the installed plugin, so
+`hermes plugins update wiki-hint` needs no reinstall.
+
+| Option | Default |
+| --- | --- |
+| `--schedule '<cron>'` | `30 5 * * 0` (profile timezone) |
+| `--wiki <path>` | `WIKI_PATH` |
+| `--homes all\|self` | `all` from the root profile (memory files of every profile), `self` from a named profile |
+| `--archive-glob '<glob>'` | `WIKI_HINT_ARCHIVE_GLOB`, e.g. `'*-statuslog-*'` |
+| `--deliver <target>` | `local` (e.g. `telegram` for the report) |
+| `--paused`, `--dry-run` | create paused; print what would be written |
+
+`hermes wiki-hint upkeep status` shows the job and its last run; `hermes wiki-hint upkeep remove`
+deletes it and its wrappers. The prompt follows `WIKI_HINT_LANG` (`en`/`nl`). The run edits files
+and runs `memory_edit.py`/`tar` unattended: `install` warns when the profile's
+`approvals.cron_mode` is not `approve`. One upkeep job per install is enough when it runs in the
+root profile with `--homes all`; a profile with its own vault gets its own job with `--homes self`.
 
 ## Install and update
 
