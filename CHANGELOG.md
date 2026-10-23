@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.0 (2026-10-23)
+
+Measured on 48 h of real sessions (166 page lines shown, 40 read): the new rules keep 37 of
+the 40 read lines (1.7.1 kept 35) and show 32 fewer matches.
+
+- Wrappers around user text (`[System note: ...]`, `[OUT-OF-BAND USER MESSAGE ...]`,
+  `[STILL IN PROGRESS ...]`) are removed before matching. A gateway system note alone got
+  6 page lines, none read; the user text inside a steer marker still matches.
+- Bare years and `next`, `user`, `system` never count as matching terms (0 reads).
+- `WIKI_HINT_EXTRA_STOPWORDS`: per-install words never used for matching.
+- The save-nudge cap (3 per session) also holds after a restart or `/resume`: nudges already in
+  the conversation history are counted. One long session got 7 nudges before.
+- Skipped sources (subagents, tool runs) no longer keep nudge state in `post_tool_call`.
+
 ## 1.7.1 (2026-10-21)
 
 - The install note on `approvals.cron_mode: deny` now says what it means: the upkeep's own commands

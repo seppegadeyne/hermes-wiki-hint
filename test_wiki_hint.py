@@ -69,7 +69,7 @@ class Base(unittest.TestCase):
         self.m.WIKI_FALLBACK = os.path.join(self.tmp, "missing-fallback")
         self._saved = {k: os.environ.pop(k, None) for k in
                        ("WIKI_PATH", "WIKI_HINT_LANG", "WIKI_HINT_NUDGE_THRESHOLD", "WIKI_HINT_SKIP_SOURCES",
-                        "HERMES_SESSION_SOURCE")}
+                        "WIKI_HINT_EXTRA_STOPWORDS", "HERMES_SESSION_SOURCE")}
         os.environ["WIKI_PATH"] = self.wiki
 
     def tearDown(self):
@@ -108,6 +108,15 @@ class Matching(Base):
     def test_multi_term(self):
         got = self.matches("Polymarket btc5m bot stop-loss herzien")
         self.assertIn("queries/polymarket-btc5m-stop-loss-review", got)
+
+    def test_years_never_count(self):
+        self.assertNotIn("2026", self.m._tokenize("rapport 2026 en 2026-10-12"))
+        self.assertIn("btc5m", self.m._tokenize("btc5m"))
+
+    def test_extra_stopwords_from_env(self):
+        self.assertIn("entities/newmotion-laadpaal-rozenlaan", self.matches("newmotion laadpaal"))
+        os.environ["WIKI_HINT_EXTRA_STOPWORDS"] = " NewMotion , foo"
+        self.assertEqual(self.matches("newmotion laadpaal"), [])
 
     def test_trivial_question_injects_nothing(self):
         self.assertEqual(self.matches("Wat is de hoofdstad van Frankrijk?"), [])
@@ -250,6 +259,28 @@ class Nudge(Base):
             got += self.nudged()
         self.assertEqual(got, self.m.MAX_NUDGES_PER_SESSION)
 
+    def test_limit_survives_restart_via_history(self):
+        # a fresh process (restart, /resume) has no counter; the replayed history has the nudges
+        nudge = self.m.MESSAGES["en"]["nudge"].format(wiki=self.wiki, n=3)
+        history = [{"role": "user", "content": "q", "api_content": "q\n\n" + nudge}
+                   for _ in range(self.m.MAX_NUDGES_PER_SESSION)]
+        self.research(self.m._nudge_threshold())
+        self.assertEqual(self.call("Dank je", conversation_history=history), "")
+        # fewer earlier nudges than the cap: one more is still allowed; that reaches the cap,
+        # so _post_tool_call arms nothing after it
+        os.environ["WIKI_HINT_LANG"] = "nl"
+        nl = self.m.MESSAGES["nl"]["nudge"].format(wiki=self.wiki, n=3)
+        history = [{"role": "user", "content": "q", "api_content": "q\n\n" + nl}] * (self.m.MAX_NUDGES_PER_SESSION - 1)
+        self.research(self.m._nudge_threshold(), sid="r")
+        self.assertIn("[wiki-hint]", self.call("Dank je", sid="r", conversation_history=history))
+        self.research(self.m._nudge_threshold() * 3, sid="r")
+        self.assertEqual(self.call("Dank je", sid="r", conversation_history=history), "")
+
+    def test_skipped_sessions_are_not_counted(self):
+        self.call("Zoek iets op", sid="sub", platform="subagent")
+        self.research(self.m._nudge_threshold() * 2, sid="sub")
+        self.assertNotIn("sub", self.m._session_state)
+
     def test_sessions_are_isolated(self):
         self.research(self.m._nudge_threshold(), sid="a")
         self.assertFalse(self.nudged(sid="b"))
@@ -386,6 +417,23 @@ class Robustness(Base):
         self.assertIn("[wiki-hint]", out)
         self.assertNotIn("newmotion-laadpaal", out)
         self.assertEqual(out.count("[wiki-hint]"), 2)
+
+    def test_wrappers_are_stripped_before_matching(self):
+        # the gateway note alone gives nothing; the user text inside a wrapper still matches
+        strip = self.m._strip_attachments
+        note = ("[System note: The previous turn was interrupted by a gateway restart; the gateway is "
+                "now back online. Any restart/shutdown command in the history has already run.]")
+        self.assertEqual(strip(note).strip(), "")
+        self.assertEqual(strip(note + "\n\nNewmotion laadpaal").strip(), "Newmotion laadpaal")
+        steer = ("[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this "
+                 "position; not tool output and not a new delivery when replayed from conversation "
+                 "history]\nDe newmotion laadpaal doet raar\n[/OUT-OF-BAND USER MESSAGE]")
+        self.assertEqual(strip(steer).strip(), "De newmotion laadpaal doet raar")
+        self.assertIn("newmotion-laadpaal", self.call(steer, sid="n2"))
+        restated = ("[STILL IN PROGRESS — this is the active request, restated after the compaction "
+                    "boundary because it was not finished yet. Continue it; do not start over.]")
+        self.assertEqual(strip(restated).strip(), "")
+        self.assertIn("newmotion-laadpaal", self.call(restated + "\nDe newmotion laadpaal doet raar", sid="n3"))
 
     def test_no_private_paths_in_source(self):
         with open(os.path.join(HERE, "__init__.py"), encoding="utf-8") as f:

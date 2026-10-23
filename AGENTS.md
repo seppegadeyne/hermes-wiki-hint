@@ -15,6 +15,7 @@ environment variables, never in edits to `__init__.py`:
 - `WIKI_HINT_SKIP_SOURCES`: session sources without hints (default
   `subagent,tool`; matched against the hook's `platform` and
   `HERMES_SESSION_SOURCE`).
+- `WIKI_HINT_EXTRA_STOPWORDS`: words never used for matching (default empty).
 
 Rules:
 - No private paths, hostnames or names in code, comments, tests or docs.
@@ -87,6 +88,19 @@ Rules:
 - Measure before tuning: replay real sessions (pages shown vs read later,
   nudges armed) against the old and the new code; keep a change only when it
   drops noise without losing lines that were actually read.
+
+## Wrappers, years and the nudge cap (since 1.8.0)
+
+- `WRAPPER_RE` removes `[System note: ...]`, the OUT-OF-BAND steer markers and
+  `[STILL IN PROGRESS ...]` before matching; the user text they carry still matches.
+  Measured: a gateway system note got 6 lines, 0 read.
+- Bare years (`YEAR_RE`) and `next`/`user`/`system` never count (0 reads in 48 h).
+- `WIKI_HINT_EXTRA_STOPWORDS` is the per-install escape for words such as an own
+  company name; never hardcode such words.
+- The nudge cap is enforced from `conversation_history` too (`NUDGE_MARKERS`, every
+  language): the in-memory counter resets on restart or /resume and one session got 7.
+- Skipped sources are remembered (`_quiet_sessions`, bounded) so `post_tool_call`
+  keeps no state for them.
 
 ## Cron mode (since 1.2.0)
 

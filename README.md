@@ -138,11 +138,19 @@ Everything is configured through environment variables (for example in
   (default `subagent,tool`). Delegated subagents and scripted
   `hermes chat --source tool` runs never read or save wiki pages, so a hint
   there only costs tokens. Set it to an empty value to hint everywhere.
+- `WIKI_HINT_EXTRA_STOPWORDS`: comma-separated words never used for page
+  matching on this install (default empty). Meant for words that are in almost
+  every question but in only a few page names, such as your own company name.
 
 Messages the harness writes itself (a finished background process, a context
 compaction summary, the cron job wrapper; they start with `[IMPORTANT`,
 `[SYSTEM` or `[CONTEXT COMPACTION`) get no page suggestions. The first-turn
-reminder and the cron instruction still apply.
+reminder and the cron instruction still apply. Wrappers around real user text
+(`[System note: ...]`, `[OUT-OF-BAND USER MESSAGE ...]`, `[STILL IN PROGRESS ...]`)
+are removed and only the user's own words are matched. Bare years never count.
+
+The cap of save nudges per session also holds after a restart or `/resume`: the
+nudges already in the conversation history are counted.
 
 Further tunables are constants at the top of `__init__.py`:
 `MAX_NUDGES_PER_SESSION`, `MAX_INJECT_MATCHES`, `MAX_LINE_CHARS`,

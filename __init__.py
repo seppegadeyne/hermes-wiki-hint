@@ -18,6 +18,8 @@ variables (e.g. in ~/.hermes/.env), never by editing this file:
 - WIKI_HINT_NUDGE_THRESHOLD   research calls between save nudges (default: 3)
 - WIKI_HINT_SKIP_SOURCES      comma-separated session sources that get no hints
                               (default: "subagent,tool")
+- WIKI_HINT_EXTRA_STOPWORDS   comma-separated words never used for matching
+                              (default: empty; e.g. an own company name)
 
 Quiet where a hint cannot help: delegated subagents (platform "subagent") and
 scripted runs started with `hermes chat --source tool` get nothing, because they
@@ -64,7 +66,17 @@ DEFAULT_LANG = "en"
 DEFAULT_SKIP_SOURCES = "subagent,tool"
 # Messages the harness writes itself start with one of these tags. Matching their wording
 # against the index only produces noise; a real user message never starts this way.
+# Case-sensitive on purpose: "[System note: ...]" may precede a real user message and is
+# handled by WRAPPER_RE below instead.
 SYSTEM_NOTE_RE = re.compile(r"^\s*\[(?:IMPORTANT|SYSTEM|CONTEXT COMPACTION)\b")
+# Harness wrappers around (or in front of) real user text: a gateway "[System note: ...]" before a
+# resumed message, the steer marker around a mid-turn message, the restated request after a
+# compaction. Their own wording ("user", "system", "next", "tool") matched random pages; the
+# wrapper is removed and only what follows is matched (nothing left: no page suggestions).
+WRAPPER_RE = re.compile(
+    r"\[(?:System note:|/?OUT-OF-BAND USER MESSAGE|STILL IN PROGRESS\b)[^\]]*\]", re.I)
+# A bare year ("2026") is in the slug of every dated page and in many questions: never a topic.
+YEAR_RE = re.compile(r"^(?:19|20)\d\d$")
 # Hermes prepends a vision model's description of an attached image to the user's text. That
 # description is long and generic ("analysis", "provided", "page") and matched random pages;
 # only the user's own words are matched. Full block first (the description may contain "]"),
@@ -174,9 +186,34 @@ def _is_system_note(text):
 
 
 def _strip_attachments(text):
-    """Drop harness-written image descriptions, keep what the user typed."""
+    """Drop harness-written image descriptions and wrappers, keep what the user typed."""
     text = ATTACHMENT_BLOCK_RE.sub(" ", text or "")
-    return ATTACHMENT_NOTE_RE.sub(" ", text)
+    text = ATTACHMENT_NOTE_RE.sub(" ", text)
+    return WRAPPER_RE.sub(" ", text)
+
+
+def _extra_stopwords():
+    """Per-install stopwords (WIKI_HINT_EXTRA_STOPWORDS, comma-separated): words that are in
+    nearly every question on this install (an own company name) but in only a few page slugs,
+    so the document-frequency rule does not see them as generic."""
+    raw = os.environ.get("WIKI_HINT_EXTRA_STOPWORDS", "").strip().strip("\"'")
+    return {w.strip().lower() for w in raw.split(",") if w.strip()}
+
+
+def _nudges_in_history(history):
+    """Save nudges already delivered in this conversation. The per-session counter lives in
+    memory and starts at zero after a restart or /resume; the injected text is replayed in the
+    history (api_content), so the cap is also enforced from there."""
+    count = 0
+    for msg in history or ():
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        for key in ("api_content", "content"):
+            text = _flatten_message(msg.get(key))
+            if any(marker in text for marker in NUDGE_MARKERS):
+                count += 1
+                break
+    return count
 
 
 def _nudge_threshold():
@@ -207,11 +244,17 @@ STOPWORDS = {
     "its", "not", "but", "can", "will", "just", "like", "what", "how", "where",
     "when", "why", "who", "them", "they", "there", "then", "than", "out",
     "which", "all", "any", "get", "got", "does", "did", "some", "such",
+    # harness and chat vocabulary: in many messages, never the topic (measured 0 reads)
+    "next", "user", "users", "system",
 }
+
+# Language-independent recognition of an injected save nudge: the text before its first field.
+NUDGE_MARKERS = tuple(m["nudge"].split("{")[0].strip() for m in MESSAGES.values())
 
 _lock = threading.Lock()
 _index_cache = {"path": None, "mtime": None, "entries": []}
 _session_state = {}  # session_id -> {"count", "nudges", "pending", "shown"}
+_quiet_sessions = {}  # session ids of skipped sources (subagents, tool runs), bounded
 
 
 def _wiki_path():
@@ -251,10 +294,10 @@ def _tokenize(text):
     words = re.findall(r"[a-z0-9][a-z0-9\-]*", text.lower())
     tokens = set()
     for w in words:
-        if len(w) >= MIN_WORD_LEN and w not in STOPWORDS:
+        if len(w) >= MIN_WORD_LEN and w not in STOPWORDS and not YEAR_RE.match(w):
             tokens.add(w)
         for part in w.split("-"):
-            if len(part) >= MIN_WORD_LEN and part not in STOPWORDS:
+            if len(part) >= MIN_WORD_LEN and part not in STOPWORDS and not YEAR_RE.match(part):
                 tokens.add(part)
     return tokens
 
@@ -334,6 +377,9 @@ def _best_matches(user_message, entries):
     - A compound query word ("self-host") does not double-count next to its
       own parts ("self", "host")."""
     q = _tokenize(user_message or "")
+    extra = _extra_stopwords()
+    if extra:
+        q = {w for w in q if w not in extra and not all(p in extra for p in w.split("-") if p)}
     if not q:
         return []
     hit_lists = []  # (matched query words, slug_tokens, line)
@@ -386,12 +432,24 @@ def _state(session_id, create=True):
     return st
 
 
+def _mark_quiet(session_id):
+    """Remember a skipped session (bounded) so post_tool_call does not count for it:
+    that hook gets no platform, only the session id."""
+    with _lock:
+        _quiet_sessions.pop(session_id, None)
+        while len(_quiet_sessions) >= MAX_TRACKED_SESSIONS:
+            _quiet_sessions.pop(next(iter(_quiet_sessions)))
+        _quiet_sessions[session_id] = True
+
+
 def _post_tool_call(tool_name, args=None, session_id=None, **kwargs):
     weight = RESEARCH_TOOLS.get(tool_name)
-    if not weight:
+    if not weight or _skipped(kwargs.get("platform")):
         return
     threshold = _nudge_threshold()
     with _lock:
+        if session_id in _quiet_sessions:
+            return
         st = _state(session_id)
         before = int(st["count"] // threshold)
         st["count"] += weight
@@ -409,6 +467,8 @@ def _cron_instruction(wiki):
 
 def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     if _skipped(kwargs.get("platform")):
+        if session_id:
+            _mark_quiet(session_id)
         return None
     wiki = _wiki_path()
     if not wiki:
@@ -418,9 +478,18 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     with _lock:
         st = _state(session_id, create=False)
         pending = bool(st and st["pending"])
-        if pending:
-            st["pending"] = False
-            st["nudges"] += 1
+    if pending and st is not None:
+        # After a restart or /resume the in-memory count is gone; the history still has them.
+        # Once the count reaches the cap, _post_tool_call arms nothing more for this session.
+        earlier = _nudges_in_history(kwargs.get("conversation_history"))
+        with _lock:
+            # re-check: a concurrent turn of the same session may have taken it meanwhile
+            if st["pending"]:
+                st["pending"] = False
+                st["nudges"] = max(st["nudges"], earlier) + 1
+                pending = st["nudges"] <= MAX_NUDGES_PER_SESSION
+            else:
+                pending = False
 
     if pending:
         parts.append(_msg("nudge", wiki=wiki, n=_nudge_threshold()))
