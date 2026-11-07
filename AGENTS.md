@@ -126,3 +126,5 @@ Rules:
 - Settings are env vars (`WIKI_HINT_INDEX_LINE_MAX`, `WIKI_HINT_PAGE_MAX_LINES`,
   `WIKI_HINT_LOG_MAX_ENTRIES`, `WIKI_HINT_LOG_ROTATION`, `WIKI_HINT_ARCHIVE_GLOB`,
   `WIKI_HINT_MAINT_HOMES`), never code edits per install.
+
+- Read CONSTRAINTS.md before writing code. Never weaken it to make a change pass; tightening is fine.
