@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.0 (2026-11-10)
+
+Measured on two weeks of real sessions: 1826 page lines shown, 167 read. 834 of them went to
+`--source tool` runs that should have been silent, 33 to one-shot runs and 176 to delegation
+results; those three groups read 7 lines together, of which at most 2 because of the hint.
+
+- Skipped sources are recognised again. Chats now run inside a shared Hermes daemon whose own
+  environment has no `HERMES_SESSION_SOURCE`, so every `hermes chat --source tool` run got the
+  reminder and three page lines (278 runs, 0 read). The source label is now asked from Hermes
+  (`agent.session_source.session_source_for`), with the environment as fallback.
+- `oneshot` joins the default `WIKI_HINT_SKIP_SOURCES` (`subagent,tool,oneshot`): finite
+  `hermes chat -q` / `hermes -z` runs read 0 of 33 lines and never saved. Set the variable to
+  `subagent,tool` to keep hints there.
+- `[ASYNC DELEGATION ...]` results (written by the harness when background subagents finish) get
+  no page suggestions, like other system notes: 144 lines per-session, 6 counted as read, most of
+  them pages the session already used before.
+
 ## 1.8.0 (2026-10-23)
 
 Measured on 48 h of real sessions (166 page lines shown, 40 read): the new rules keep 37 of

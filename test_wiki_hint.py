@@ -12,6 +12,7 @@ per copy) and check markers, paths and page slugs instead.
 import importlib.util
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -399,6 +400,32 @@ class Robustness(Base):
         os.environ.pop("HERMES_SESSION_SOURCE")
         self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", first=True, platform="cli"))
 
+    def test_source_label_from_hermes_wins_over_missing_env(self):
+        # inside the shared daemon the environment has no session source; Hermes' reader has it
+        import types
+        fake = types.ModuleType("agent.session_source")
+        label: dict = {"value": "tool"}
+        setattr(fake, "session_source_for", lambda platform: label["value"].lower())
+        saved = {k: sys.modules.get(k) for k in ("agent", "agent.session_source")}
+        sys.modules["agent"] = types.ModuleType("agent")
+        sys.modules["agent.session_source"] = fake
+        try:
+            for value in ("tool", "oneshot"):
+                label["value"] = value
+                self.assertEqual(self.call("De newmotion laadpaal doet raar", first=True, platform="local"), "")
+            label["value"] = "desktop"
+            self.assertIn("newmotion-laadpaal",
+                          self.call("De newmotion laadpaal doet raar", first=True, sid="d1", platform="local"))
+            label["value"] = None  # a broken reader (raises) must not break the hint
+            self.assertIn("newmotion-laadpaal",
+                          self.call("De newmotion laadpaal doet raar", first=True, sid="d2", platform="local"))
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+
     def test_skip_sources_can_be_changed_or_emptied(self):
         os.environ["WIKI_HINT_SKIP_SOURCES"] = ""
         self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", platform="subagent"))
@@ -409,6 +436,7 @@ class Robustness(Base):
     def test_system_notes_get_no_page_suggestions(self):
         for note in ("[IMPORTANT: Background process proc_1 completed. laadpaal",
                      "[CONTEXT COMPACTION — REFERENCE ONLY] laadpaal",
+                     "[ASYNC DELEGATION BATCH COMPLETE — deleg_1] newmotion laadpaal",
                      "  [SYSTEM: laadpaal"):
             self.assertNotIn("newmotion-laadpaal", self.call(note, sid=note))
         # the cron wrapper message keeps the reminder and the cron instruction

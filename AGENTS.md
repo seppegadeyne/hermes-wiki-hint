@@ -13,8 +13,8 @@ environment variables, never in edits to `__init__.py`:
 - `WIKI_HINT_LANG`: `en` (default) or `nl`; texts live in `MESSAGES`.
 - `WIKI_HINT_NUDGE_THRESHOLD`: research calls between nudges (default 3).
 - `WIKI_HINT_SKIP_SOURCES`: session sources without hints (default
-  `subagent,tool`; matched against the hook's `platform` and
-  `HERMES_SESSION_SOURCE`).
+  `subagent,tool,oneshot`; matched against the hook's `platform`, Hermes'
+  session source label and `HERMES_SESSION_SOURCE`).
 - `WIKI_HINT_EXTRA_STOPWORDS`: words never used for matching (default empty).
 
 Rules:
@@ -101,6 +101,16 @@ Rules:
   language): the in-memory counter resets on restart or /resume and one session got 7.
 - Skipped sources are remembered (`_quiet_sessions`, bounded) so `post_tool_call`
   keeps no state for them.
+
+## Source label, one-shots and delegation results (since 1.9.0)
+
+- `_session_source` asks Hermes (`agent.session_source.session_source_for`) for the label the
+  session row carries. Chats run in a shared daemon whose environment has no
+  `HERMES_SESSION_SOURCE`; reading only `os.environ` let 278 `--source tool` runs through in two
+  weeks (834 lines, 0 read). Every audit: check that skipped sources have 0 hinted messages.
+- `oneshot` is skipped by default (0/33 read, no saves).
+- `[ASYNC DELEGATION` messages are system notes: no page matches (6/144 counted as read, mostly
+  pages the session had already used).
 
 ## Cron mode (since 1.2.0)
 

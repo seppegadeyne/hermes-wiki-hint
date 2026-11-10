@@ -17,14 +17,15 @@ variables (e.g. in ~/.hermes/.env), never by editing this file:
 - WIKI_HINT_LANG              language of injected texts: "en" (default) or "nl"
 - WIKI_HINT_NUDGE_THRESHOLD   research calls between save nudges (default: 3)
 - WIKI_HINT_SKIP_SOURCES      comma-separated session sources that get no hints
-                              (default: "subagent,tool")
+                              (default: "subagent,tool,oneshot")
 - WIKI_HINT_EXTRA_STOPWORDS   comma-separated words never used for matching
                               (default: empty; e.g. an own company name)
 
-Quiet where a hint cannot help: delegated subagents (platform "subagent") and
-scripted runs started with `hermes chat --source tool` get nothing, because they
-neither read nor save wiki pages. Messages the harness writes itself (a finished
-background process, a context-compaction summary, the cron job wrapper) get no
+Quiet where a hint cannot help: delegated subagents (platform "subagent"),
+scripted runs started with `hermes chat --source tool` and finite one-shot runs
+(`hermes chat -q`, `hermes -z`) get nothing, because they neither read nor save
+wiki pages. Messages the harness writes itself (a finished background process or
+delegation batch, a context-compaction summary, the cron job wrapper) get no
 page suggestions; the first-turn reminder and the cron instruction still apply.
 
 Matching v2: tokens are split on hyphens (wiki slugs such as
@@ -63,12 +64,12 @@ COMMON_DF_FRACTION = 0.12    # word in > this share of the index = generic
 COMMON_DF_MIN = 15           # ... but never below this page count (small wikis)
 MAX_TRACKED_SESSIONS = 256   # per-session state is bounded (oldest dropped)
 DEFAULT_LANG = "en"
-DEFAULT_SKIP_SOURCES = "subagent,tool"
+DEFAULT_SKIP_SOURCES = "subagent,tool,oneshot"
 # Messages the harness writes itself start with one of these tags. Matching their wording
 # against the index only produces noise; a real user message never starts this way.
 # Case-sensitive on purpose: "[System note: ...]" may precede a real user message and is
 # handled by WRAPPER_RE below instead.
-SYSTEM_NOTE_RE = re.compile(r"^\s*\[(?:IMPORTANT|SYSTEM|CONTEXT COMPACTION)\b")
+SYSTEM_NOTE_RE = re.compile(r"^\s*\[(?:IMPORTANT|SYSTEM|CONTEXT COMPACTION|ASYNC DELEGATION)\b")
 # Harness wrappers around (or in front of) real user text: a gateway "[System note: ...]" before a
 # resumed message, the steer marker around a mid-turn message, the restated request after a
 # compaction. Their own wording ("user", "system", "next", "tool") matched random pages; the
@@ -172,12 +173,24 @@ def _skip_sources():
     return {s.strip().lower() for s in raw.strip().strip("\"'").split(",") if s.strip()}
 
 
+def _session_source(platform):
+    """The source label Hermes gives this session (the `source` of its session row: tool, oneshot, ...).
+    Chats run inside a shared daemon whose own environment carries no session source, so Hermes'
+    reader is asked first; without it (older Hermes, tests) the process environment is all there is."""
+    try:
+        from agent.session_source import session_source_for
+        return session_source_for(platform)
+    except Exception:
+        return ""
+
+
 def _skipped(platform):
-    """True for a session whose source gets no hints (platform, or the --source of a one-shot run)."""
+    """True for a session whose source gets no hints (platform, or the source label of the session)."""
     skip = _skip_sources()
     if not skip:
         return False
-    sources = {str(platform or "").strip().lower(), os.environ.get("HERMES_SESSION_SOURCE", "").strip().lower()}
+    sources = {str(s or "").strip().lower() for s in (
+        platform, _session_source(platform), os.environ.get("HERMES_SESSION_SOURCE"))}
     return bool(sources & skip)
 
 

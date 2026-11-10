@@ -135,9 +135,10 @@ Everything is configured through environment variables (for example in
 - `WIKI_HINT_NUDGE_THRESHOLD`: research calls between save nudges
   (default `3`).
 - `WIKI_HINT_SKIP_SOURCES`: comma-separated session sources that get no hints
-  (default `subagent,tool`). Delegated subagents and scripted
-  `hermes chat --source tool` runs never read or save wiki pages, so a hint
-  there only costs tokens. Set it to an empty value to hint everywhere.
+  (default `subagent,tool,oneshot`). Delegated subagents, scripted
+  `hermes chat --source tool` runs and finite one-shot runs (`hermes chat -q`,
+  `hermes -z`) never read or save wiki pages, so a hint there only costs
+  tokens. Set it to an empty value to hint everywhere.
 - `WIKI_HINT_EXTRA_STOPWORDS`: comma-separated words never used for page
   matching on this install (default empty). Meant for words that are in almost
   every question but in only a few page names, such as your own company name.
