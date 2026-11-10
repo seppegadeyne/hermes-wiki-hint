@@ -173,25 +173,30 @@ def _skip_sources():
     return {s.strip().lower() for s in raw.strip().strip("\"'").split(",") if s.strip()}
 
 
-def _session_source(platform):
-    """The source label Hermes gives this session (the `source` of its session row: tool, oneshot, ...).
-    Chats run inside a shared daemon whose own environment carries no session source, so Hermes'
-    reader is asked first; without it (older Hermes, tests) the process environment is all there is."""
+def _session_sources(platform):
+    """Every name this session goes by: the hook's platform, the process environment, and the labels
+    Hermes itself keeps. Inside the shared daemon a `--source tool` or one-shot run has platform "cli"
+    and nothing in the environment; its creation label (the `source` of the session row) is on the
+    turn's launch policy. A standalone CLI process has no policy; there Hermes derives the label.
+    Each reader is optional: an older or changed Hermes just contributes nothing."""
+    labels = [platform, os.environ.get("HERMES_SESSION_SOURCE")]
+    try:
+        from gateway.session_policy import active_policy
+        labels.append(getattr(active_policy(), "source", None))
+    except Exception:
+        labels.append(None)
     try:
         from agent.session_source import session_source_for
-        return session_source_for(platform)
+        labels.append(session_source_for(platform))
     except Exception:
-        return ""
+        labels.append(None)
+    return {str(s or "").strip().lower() for s in labels}
 
 
 def _skipped(platform):
-    """True for a session whose source gets no hints (platform, or the source label of the session)."""
+    """True for a session whose source gets no hints (platform, or a source label of the session)."""
     skip = _skip_sources()
-    if not skip:
-        return False
-    sources = {str(s or "").strip().lower() for s in (
-        platform, _session_source(platform), os.environ.get("HERMES_SESSION_SOURCE"))}
-    return bool(sources & skip)
+    return bool(skip and _session_sources(platform) & skip)
 
 
 def _is_system_note(text):

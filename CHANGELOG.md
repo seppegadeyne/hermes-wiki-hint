@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.1 (2026-11-10)
+
+- The 1.9.0 fix for skipped sources did not work inside the shared daemon (found in review): there
+  a `--source tool` or one-shot run has platform `cli`, an empty session-source variable, and
+  Hermes' derived label is `cli` as well. The creation label is on the turn's launch policy, so it
+  is now read from `gateway.session_policy.active_policy().source`; the derived label and the
+  environment stay as fallbacks for a standalone CLI process and older Hermes versions.
+
 ## 1.9.0 (2026-11-10)
 
 Measured on two weeks of real sessions: 1826 page lines shown, 167 read. 834 of them went to

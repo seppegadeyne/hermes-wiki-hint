@@ -14,7 +14,7 @@ environment variables, never in edits to `__init__.py`:
 - `WIKI_HINT_NUDGE_THRESHOLD`: research calls between nudges (default 3).
 - `WIKI_HINT_SKIP_SOURCES`: session sources without hints (default
   `subagent,tool,oneshot`; matched against the hook's `platform`, Hermes'
-  session source label and `HERMES_SESSION_SOURCE`).
+  session source labels and `HERMES_SESSION_SOURCE`).
 - `WIKI_HINT_EXTRA_STOPWORDS`: words never used for matching (default empty).
 
 Rules:
@@ -104,10 +104,14 @@ Rules:
 
 ## Source label, one-shots and delegation results (since 1.9.0)
 
-- `_session_source` asks Hermes (`agent.session_source.session_source_for`) for the label the
-  session row carries. Chats run in a shared daemon whose environment has no
-  `HERMES_SESSION_SOURCE`; reading only `os.environ` let 278 `--source tool` runs through in two
-  weeks (834 lines, 0 read). Every audit: check that skipped sources have 0 hinted messages.
+- `_session_sources` collects every name of the session: hook `platform`, `HERMES_SESSION_SOURCE`,
+  the creation label on the turn's launch policy (`gateway.session_policy.active_policy().source`)
+  and Hermes' derived label (`agent.session_source.session_source_for`). Chats run in a shared
+  daemon where a `--source tool` or one-shot run has platform `cli` and no source in the
+  environment; only the policy knows (1.9.0 read the derived label alone and still leaked, fixed
+  in 1.9.1). Reading only `os.environ` let 278 `--source tool` runs through in two weeks (834
+  lines, 0 read). Every audit: check that skipped sources have 0 hinted messages, on real
+  sessions; a unit test with a faked reader proves nothing about what Hermes returns.
 - `oneshot` is skipped by default (0/33 read, no saves).
 - `[ASYNC DELEGATION` messages are system notes: no page matches (6/144 counted as read, mostly
   pages the session had already used).

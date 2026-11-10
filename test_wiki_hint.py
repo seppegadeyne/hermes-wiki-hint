@@ -401,24 +401,31 @@ class Robustness(Base):
         self.assertIn("newmotion-laadpaal", self.call("De newmotion laadpaal doet raar", first=True, platform="cli"))
 
     def test_source_label_from_hermes_wins_over_missing_env(self):
-        # inside the shared daemon the environment has no session source; Hermes' reader has it
+        # Inside the shared daemon a tool / one-shot run has platform "cli", no session source in the
+        # environment and Hermes' derived label says "cli" too; only the turn's launch policy knows.
         import types
-        fake = types.ModuleType("agent.session_source")
-        label: dict = {"value": "tool"}
-        setattr(fake, "session_source_for", lambda platform: label["value"].lower())
-        saved = {k: sys.modules.get(k) for k in ("agent", "agent.session_source")}
-        sys.modules["agent"] = types.ModuleType("agent")
-        sys.modules["agent.session_source"] = fake
+        policy: dict = {"source": "tool"}
+        derived: dict = {"value": "cli"}
+        mods = {"agent": types.ModuleType("agent"), "agent.session_source": types.ModuleType("agent.session_source"),
+                "gateway": types.ModuleType("gateway"), "gateway.session_policy": types.ModuleType("gateway.session_policy")}
+        setattr(mods["agent.session_source"], "session_source_for", lambda platform: derived["value"].lower())
+        setattr(mods["gateway.session_policy"], "active_policy",
+                lambda: types.SimpleNamespace(source=policy["source"].lower()) if policy["source"] != "none" else None)
+        saved = {k: sys.modules.get(k) for k in mods}
+        sys.modules.update(mods)
+        ask = "De newmotion laadpaal doet raar"
         try:
             for value in ("tool", "oneshot"):
-                label["value"] = value
-                self.assertEqual(self.call("De newmotion laadpaal doet raar", first=True, platform="local"), "")
-            label["value"] = "desktop"
-            self.assertIn("newmotion-laadpaal",
-                          self.call("De newmotion laadpaal doet raar", first=True, sid="d1", platform="local"))
-            label["value"] = None  # a broken reader (raises) must not break the hint
-            self.assertIn("newmotion-laadpaal",
-                          self.call("De newmotion laadpaal doet raar", first=True, sid="d2", platform="local"))
+                policy["source"] = value
+                self.assertEqual(self.call(ask, first=True, platform="cli"), "")
+            policy["source"] = "gui"
+            self.assertIn("newmotion-laadpaal", self.call(ask, first=True, sid="d1", platform="cli"))
+            policy["source"] = "none"  # standalone CLI process: no policy, Hermes derives the label
+            self.assertIn("newmotion-laadpaal", self.call(ask, first=True, sid="d2", platform="cli"))
+            derived["value"] = "oneshot"
+            self.assertEqual(self.call(ask, first=True, sid="d3", platform="cli"), "")
+            policy["source"] = derived["value"] = None  # both readers raise: the hint must survive
+            self.assertIn("newmotion-laadpaal", self.call(ask, first=True, sid="d4", platform="cli"))
         finally:
             for k, v in saved.items():
                 if v is None:
