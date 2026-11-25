@@ -1,7 +1,8 @@
 name: wiki-hint
-version: 1.9.1
+version: 1.10.0
 description: Nudges the agent to use its llm-wiki during research and proactively save durable findings (also in cron runs); read-only upkeep audit of the wiki and memory files
 author: seppegadeyne
 provides_hooks:
   - pre_llm_call
   - post_tool_call
+  - transform_tool_result

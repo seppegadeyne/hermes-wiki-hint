@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-07
+Last reviewed: 2026-11-25
 
 ## Floor (always enforced)
 - The plugin never writes to the wiki from hooks (see AGENTS.md).
@@ -14,7 +14,7 @@ Last reviewed: 2026-11-07
 ## Enforced with numbers
 | Dimension | Rule | Checked by | Runs at |
 |---|---|---|---|
-| Tests | all pass (71 total today: 47 + 24) | `python3 test_wiki_hint.py` and `python3 test_maintenance.py` | every change |
+| Tests | all pass (76 total today: 52 + 24) | `python3 test_wiki_hint.py` and `python3 test_maintenance.py` | every change |
 | Plugin validity | doctor passes | `hermes plugins doctor . --ci` | every change |
 
 ## Measured, not yet enforced (ratchets)

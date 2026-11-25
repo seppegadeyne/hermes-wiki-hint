@@ -15,7 +15,7 @@ writing anything itself.
 
 ## What it does
 
-Two lifecycle hooks and one read-only slash command (`/wiki-audit`, see Upkeep below), no tools:
+Three lifecycle hooks and one read-only slash command (`/wiki-audit`, see Upkeep below), no tools:
 
 - **`pre_llm_call`** (context injection):
   - *First turn of a session*: injects a short reminder that a wiki exists at
@@ -36,12 +36,23 @@ Two lifecycle hooks and one read-only slash command (`/wiki-audit`, see Upkeep b
       the user typed count.
     - Injects up to 3 matching page lines (truncated to 220 chars each);
       trivial questions ("capital of France") inject nothing.
-  - *First turn of a cron session* (session id starts with `cron_`, or
-    platform is `cron`): injects a one-time instruction to finish the task
-    first and then record durable facts/decisions in the wiki via the
-    llm-wiki skill (no personal data, secrets or run logs; silent when
-    there is nothing worth saving). This keeps the behaviour central, so
-    individual cron prompts need no wiki lines.
+  - *First turn of an unattended run* (cron: session id starts with `cron_`
+    or platform is `cron`; one-shot runs such as an issue loop's `hermes -z`
+    per issue, when `oneshot` is not in `WIKI_HINT_SKIP_SOURCES`): treats the
+    wiki as the shared findings database. Read index.md and the relevant
+    pages before starting (no redone research, no duplicate issues); GitHub
+    issues stay the place for work and status, but knowledge that stays true
+    after the issue closes also goes to the wiki with a link to the issue
+    (no personal data, secrets or run reports; silent when there is nothing
+    worth saving). This keeps the behaviour central, so individual cron
+    prompts need no wiki lines.
+- **`transform_tool_result`**: after a tool call that writes to GitHub
+  (`gh`/`ghw` `issue|pr` `create|comment|close`, in a terminal command or an
+  execute_code script) one short note is appended to the result: a durable
+  finding in that issue also belongs in the wiki, with the issue as source.
+  Max 2 per session. `pre_llm_call` only runs once per user turn, so in a
+  cron job or a loop run (one long turn) this is the only moment a reminder
+  arrives while the finding is fresh.
 - **`post_tool_call`** (observer): counts research tool calls
   (`web_search`, `web_extract`, `session_search`; a `browser_exec` step counts
   for a quarter, since most browser calls test a page rather than research)
@@ -138,7 +149,9 @@ Everything is configured through environment variables (for example in
   (default `subagent,tool,oneshot`). Delegated subagents, scripted
   `hermes chat --source tool` runs and finite one-shot runs (`hermes chat -q`,
   `hermes -z`) never read or save wiki pages, so a hint there only costs
-  tokens. Set it to an empty value to hint everywhere.
+  tokens. Set it to an empty value to hint everywhere. An agent whose issue
+  loop runs as one-shots should use `subagent,tool`, so the loop gets the
+  unattended-run instruction and the GitHub-write note.
 - `WIKI_HINT_EXTRA_STOPWORDS`: comma-separated words never used for page
   matching on this install (default empty). Meant for words that are in almost
   every question but in only a few page names, such as your own company name.

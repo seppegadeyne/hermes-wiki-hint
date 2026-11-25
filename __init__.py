@@ -1,6 +1,7 @@
 """wiki-hint - Hermes plugin.
 
-Two hooks:
+Three hooks (transform_tool_result: after a `gh issue/pr create|comment|close`, a one-line note
+to record a durable finding in the wiki with a link to the issue; capped per session) plus:
 - pre_llm_call: injects a short wiki reminder plus the most relevant wiki pages
   (keyword overlap with the user message), and a one-off "save this" nudge
   after a lot of research.
@@ -63,6 +64,13 @@ MIN_SUBSTR_LEN = 6           # min length for substring matching
 COMMON_DF_FRACTION = 0.12    # word in > this share of the index = generic
 COMMON_DF_MIN = 15           # ... but never below this page count (small wikis)
 MAX_TRACKED_SESSIONS = 256   # per-session state is bounded (oldest dropped)
+MAX_ISSUE_NOTES_PER_SESSION = 2
+# A GitHub write (gh or a gh wrapper such as ghw) in a terminal command or an execute_code script.
+# Crons and issue loops file their findings here. Other tools (write_file, delegate_task) may only
+# mention such a command. shortcut: edit/reopen/merge/review and `gh api` are not matched; add them
+# when runs file findings that way.
+GH_WRITE_RE = re.compile(r"\bghw?\s+(?:issue|pr)\s+(?:create|comment|close)\b")
+GH_WRITE_TOOLS = {"terminal": "command", "execute_code": "code"}
 DEFAULT_LANG = "en"
 DEFAULT_SKIP_SOURCES = "subagent,tool,oneshot"
 # Messages the harness writes itself start with one of these tags. Matching their wording
@@ -107,15 +115,23 @@ MESSAGES = {
             "not only in your answer."
         ),
         "cron": (
-            "[wiki-hint] This is a scheduled (cron) run. An llm-wiki lives at {wiki}. "
-            "Finish your task COMPLETELY first. Then briefly assess whether there are "
-            "durable facts or decisions a later run or another agent needs (confirmed "
-            "findings, discovered pitfalls, working recipes, decisions with reasons). "
-            "If so: record them concisely following the llm-wiki skill (orient via "
-            "SCHEMA.md/index.md, update the right concept/entity/query page or create "
-            "one, update index.md and log.md; no duplicate pages). Never personal "
-            "data, secrets, tokens or raw tool output; no run log or status that "
-            "already lives in GitHub/Fizzy. If not: write nothing and do not mention it."
+            "[wiki-hint] This is an unattended (scheduled or loop) run. The llm-wiki at {wiki} is the "
+            "shared findings database of every run and agent. BEFORE you start: read index.md and the "
+            "pages relevant to this task (earlier findings, pitfalls, decisions) so you do not redo "
+            "research or open a duplicate issue. GitHub issues stay the place for work, status and "
+            "reports. AFTER the task: knowledge that stays true once the issue is closed (a confirmed "
+            "cause, a pitfall, a working recipe, a decision with its reason, a fact about a site or "
+            "tool) also goes to the wiki, concisely, on the right concept/entity/query page (llm-wiki "
+            "skill, no duplicate pages) with a link to the issue as source (#123 or its URL); add the "
+            "page to index.md if new and one line to log.md (no run report). Never personal data, "
+            "secrets, tokens or raw tool output. Nothing durable: write nothing and do not mention it."
+        ),
+        "issue": (
+            "[wiki-hint] You just wrote to GitHub. If this holds a durable finding (a confirmed cause, "
+            "pitfall, working recipe, decision with its reason, or a fact that stays true after the "
+            "issue closes), also record it concisely in the wiki at {wiki} (right page, link to the "
+            "issue as source, index.md/log.md per the llm-wiki skill). Status and progress stay in "
+            "the issue. If not: carry on without mentioning this."
         ),
         "matches": (
             "[wiki-hint] Possibly relevant wiki pages at {wiki} "
@@ -140,14 +156,23 @@ MESSAGES = {
             "de wiki (llm-wiki skill), niet alleen in het antwoord."
         ),
         "cron": (
-            "[wiki-hint] Dit is een geplande (cron) run. Er staat een llm-wiki onder {wiki}. "
-            "Rond je taak EERST volledig af. Beoordeel daarna kort of er duurzame feiten of "
-            "beslissingen zijn die een volgende run of een andere agent nodig heeft (bevestigde "
-            "bevindingen, ontdekte valkuilen, werkende recepten, gemaakte keuzes met reden). "
-            "Zo ja: leg ze beknopt vast volgens de llm-wiki skill (oriënteer via SCHEMA.md/index.md, "
-            "werk de juiste concept/entity/query-pagina bij of maak er één, werk index.md en log.md bij; "
-            "geen dubbele pagina's). Nooit persoonsgegevens, secrets, tokens of ruwe tool-output; "
-            "geen run-logboek of status die al in GitHub/Fizzy staat. Zo nee: schrijf niets en meld hier niets over."
+            "[wiki-hint] Dit is een onbewaakte run (cron of loop). De llm-wiki onder {wiki} is de gedeelde "
+            "bevindingendatabase van alle runs en agents. VOORAF: lees index.md en de pagina's die bij deze "
+            "taak horen (eerdere bevindingen, valkuilen, beslissingen), zodat je geen onderzoek overdoet of "
+            "een dubbel issue opent. GitHub-issues blijven de plek voor werk, status en verslagen. ACHTERAF: "
+            "kennis die blijft kloppen als het issue dicht is (een bevestigde oorzaak, een valkuil, een "
+            "werkend recept, een beslissing met reden, een feit over een site of tool) gaat ook beknopt naar "
+            "de wiki, op de juiste concept/entity/query-pagina (llm-wiki skill, geen dubbele pagina's) met "
+            "een link naar het issue als bron (#123 of de URL); nieuwe pagina in index.md, één regel in "
+            "log.md (geen runverslag). Nooit persoonsgegevens, secrets, tokens of ruwe tool-output. Niets "
+            "duurzaams: schrijf niets en meld hier niets over."
+        ),
+        "issue": (
+            "[wiki-hint] Je schreef net naar GitHub. Zit hier een duurzame bevinding in (bevestigde oorzaak, "
+            "valkuil, werkend recept, beslissing met reden, feit dat blijft kloppen na het sluiten van het "
+            "issue)? Leg die dan ook beknopt vast in de wiki onder {wiki} (juiste pagina, link naar het issue "
+            "als bron, index.md/log.md volgens de llm-wiki skill). Status en voortgang blijven in het issue. "
+            "Zo nee: ga verder zonder hierover te melden."
         ),
         "matches": (
             "[wiki-hint] Mogelijk relevante wiki-pagina's onder {wiki} "
@@ -271,7 +296,7 @@ NUDGE_MARKERS = tuple(m["nudge"].split("{")[0].strip() for m in MESSAGES.values(
 
 _lock = threading.Lock()
 _index_cache = {"path": None, "mtime": None, "entries": []}
-_session_state = {}  # session_id -> {"count", "nudges", "pending", "shown"}
+_session_state = {}  # session_id -> {"count", "nudges", "pending", "shown", "issue_notes"}
 _quiet_sessions = {}  # session ids of skipped sources (subagents, tool runs), bounded
 
 
@@ -443,7 +468,7 @@ def _state(session_id, create=True):
     if st is None:
         if not create:
             return None
-        st = {"count": 0, "nudges": 0, "pending": False, "shown": set()}
+        st = {"count": 0, "nudges": 0, "pending": False, "shown": set(), "issue_notes": 0}
         while len(_session_state) >= MAX_TRACKED_SESSIONS:
             _session_state.pop(next(iter(_session_state)))
     _session_state[key] = st  # last = most recently used
@@ -475,8 +500,43 @@ def _post_tool_call(tool_name, args=None, session_id=None, **kwargs):
             st["pending"] = True
 
 
+def _transform_tool_result(tool_name=None, args=None, result=None, session_id=None, **kwargs):
+    """After a GitHub issue/PR write, append a one-line wiki note to the tool result.
+
+    pre_llm_call runs once per user turn, so a cron job or an issue-loop run (one long turn) never
+    sees a nudge armed mid-run; the tool result is the only channel that reaches it while the
+    finding is fresh. Capped per session; returns None (result unchanged) otherwise.
+
+    Calls made from inside an execute_code script arrive without a session id and their result is
+    parsed as JSON by the script: never touch those (the outer execute_code result gets the note)."""
+    key = GH_WRITE_TOOLS.get(str(tool_name or ""))
+    if not key or not session_id or not isinstance(result, str) or not isinstance(args, dict):
+        return None
+    if kwargs.get("status") not in (None, "", "ok") or not GH_WRITE_RE.search(str(args.get(key) or "")):
+        return None
+    if _skipped(None):  # this hook gets no platform; the session's source labels still apply
+        return None
+    wiki = _wiki_path()
+    if not wiki:
+        return None
+    with _lock:
+        if session_id in _quiet_sessions:
+            return None
+        st = _state(session_id)
+        if st["issue_notes"] >= MAX_ISSUE_NOTES_PER_SESSION:
+            return None
+        st["issue_notes"] += 1
+    return result + "\n\n" + _msg("issue", wiki=wiki)
+
+
 def _is_cron(session_id, platform=None):
     return str(session_id or "").startswith(CRON_SESSION_PREFIX) or str(platform or "") == "cron"
+
+
+def _is_unattended(session_id, platform=None):
+    """Cron runs and one-shot runs (issue loops start `hermes -z/-q` per issue) work without a
+    human; they get the cron instruction. One-shots only reach this when not skipped."""
+    return _is_cron(session_id, platform) or "oneshot" in _session_sources(platform)
 
 
 def _cron_instruction(wiki):
@@ -515,7 +575,7 @@ def _pre_llm_call(user_message, is_first_turn=False, session_id=None, **kwargs):
     if is_first_turn:
         parts.append(_msg("first_turn", wiki=wiki))
 
-    if is_first_turn and _is_cron(session_id, kwargs.get("platform")):
+    if is_first_turn and _is_unattended(session_id, kwargs.get("platform")):
         parts.append(_cron_instruction(wiki))
 
     # Page suggestions on every turn (first included) with a relevant question.
@@ -579,6 +639,7 @@ def _audit_command(raw_args="", **_kwargs):
 def register(ctx):
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("post_tool_call", _post_tool_call)
+    ctx.register_hook("transform_tool_result", _transform_tool_result)
     if hasattr(ctx, "register_command"):
         ctx.register_command("wiki-audit", handler=_audit_command,
                              description="Read-only health report of the wiki and the memory files")

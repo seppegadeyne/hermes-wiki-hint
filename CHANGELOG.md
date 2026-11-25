@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.10.0 (2026-11-25)
+
+Measured on three agents with a cron schedule and an issue loop (14 days): ~650 loop runs and ~85
+cron runs per agent, hundreds of `gh issue create/comment` calls, and 0-3 wiki writes. The hook
+was live (probed), but nothing reached the moment a finding was written down.
+
+- New `transform_tool_result` hook: after a GitHub write (`gh`/`ghw` `issue|pr`
+  `create|comment|close`) one note is appended to the tool result: a durable finding belongs in
+  the wiki too, with the issue as source. Max 2 per session. The research nudge rides
+  `pre_llm_call`, which runs once per user turn, so a cron or loop run (one turn) never got it.
+- The cron instruction now treats the wiki as the shared findings database: read index.md and the
+  relevant pages first, keep work and status in GitHub issues, and record knowledge that outlives
+  the issue on the right page with a link to it. The old text ("no run log or status that already
+  lives in GitHub") read as "findings in an issue do not belong in the wiki".
+- One-shot runs get the same instruction when `oneshot` is not skipped (issue loops start one
+  `hermes -z` per issue). Default skip list unchanged; such installs set
+  `WIKI_HINT_SKIP_SOURCES=subagent,tool`.
+
 ## 1.9.1 (2026-11-10)
 
 - The 1.9.0 fix for skipped sources did not work inside the shared daemon (found in review): there

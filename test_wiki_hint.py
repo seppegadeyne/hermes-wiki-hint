@@ -221,6 +221,53 @@ class Cron(Base):
     def test_cron_instruction_only_on_first_turn(self):
         self.assertEqual(self.call("Hallo", first=False, sid="cron_x_1", platform="cron"), "")
 
+    def test_oneshot_loop_run_gets_cron_mode_when_not_skipped(self):
+        # issue loops run one `hermes -z` per issue: skipped by default, unattended when enabled
+        os.environ["HERMES_SESSION_SOURCE"] = "oneshot"
+        self.assertEqual(self.call("Run issue 12", first=True, sid="o1", platform="cli"), "")
+        os.environ["WIKI_HINT_SKIP_SOURCES"] = "subagent,tool"
+        self.assertEqual(self.call("Run issue 12", first=True, sid="o2", platform="cli").count("[wiki-hint]"), 2)
+
+
+class IssueNote(Base):
+    def gh(self, command, sid="s1", tool="terminal", key="command", **kw):
+        return self.m._transform_tool_result(tool_name=tool, args={key: command}, result='{"output": "ok"}',
+                                             session_id=sid, **kw)
+
+    def test_gh_write_gets_a_note(self):
+        out = self.gh("gh issue create --title x --body y")
+        self.assertTrue(out.startswith('{"output": "ok"}'))
+        self.assertIn("[wiki-hint]", out)
+        self.assertIn(self.wiki, out)
+        self.assertIn("[wiki-hint]", self.gh("ghw pr comment 4 -b done", sid="s2"))
+        self.assertIn("[wiki-hint]", self.gh("terminal('gh  issue close 9')", sid="s3", tool="execute_code", key="code"))
+
+    def test_reads_and_other_commands_are_unchanged(self):
+        for cmd in ("gh issue list", "gh issue view 3", "ls", "echo gh issue"):
+            self.assertIsNone(self.gh(cmd, sid=cmd))
+        # a file or a delegation goal that only mentions the command is no GitHub write
+        self.assertIsNone(self.gh("run gh issue create", sid="w", tool="write_file", key="content"))
+        self.assertIsNone(self.gh("gh issue create", sid="f", status="error"))
+        # terminal() inside an execute_code script: no session id, the script parses the result as JSON
+        self.assertIsNone(self.gh("gh issue create", sid=""))
+        self.assertIsNone(self.m._transform_tool_result(tool_name="terminal", args=None, result="x"))
+        self.assertIsNone(self.m._transform_tool_result(tool_name="terminal", args={"command": "gh issue create"},
+                                                        result={"not": "a string"}))
+
+    def test_capped_per_session(self):
+        got = sum(self.gh("gh issue comment 1 -b x") is not None for _ in range(5))
+        self.assertEqual(got, self.m.MAX_ISSUE_NOTES_PER_SESSION)
+        self.assertIsNotNone(self.gh("gh issue comment 1 -b x", sid="other"))
+
+    def test_skipped_and_quiet_sessions_and_no_wiki(self):
+        os.environ["HERMES_SESSION_SOURCE"] = "tool"  # the hook gets no platform, only source labels
+        self.assertIsNone(self.gh("gh issue create", sid="t"))
+        os.environ.pop("HERMES_SESSION_SOURCE")
+        self.call("hoi", sid="q", platform="subagent")  # marks the session quiet
+        self.assertIsNone(self.gh("gh issue create", sid="q"))
+        os.environ["WIKI_PATH"] = os.path.join(self.tmp, "nope")
+        self.assertIsNone(self.gh("gh issue create", sid="nw"))
+
 
 class Nudge(Base):
     def research(self, n, sid="s1", tool="web_search"):
@@ -364,6 +411,7 @@ class Robustness(Base):
         before = sorted(os.listdir(self.wiki))
         self.m._post_tool_call("web_search", session_id="s")
         self.call("De newmotion laadpaal doet raar", first=True, sid="cron_x_1", platform="cron")
+        self.m._transform_tool_result(tool_name="terminal", args={"command": "gh issue create"}, result="ok")
         self.assertEqual(sorted(os.listdir(self.wiki)), before)
 
     def test_register(self):
@@ -374,7 +422,7 @@ class Robustness(Base):
                 hooks[name] = fn
 
         self.m.register(Ctx())
-        self.assertEqual(set(hooks), {"pre_llm_call", "post_tool_call"})
+        self.assertEqual(set(hooks), {"pre_llm_call", "post_tool_call", "transform_tool_result"})
 
     def test_lang_defaults_to_english_and_switches_to_dutch(self):
         en = self.call("Hallo", first=True)

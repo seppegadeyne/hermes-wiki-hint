@@ -39,7 +39,8 @@ Rules:
 ## Behavior that must stay
 
 - The plugin NEVER writes to the wiki itself; context injection via
-  `pre_llm_call` and observation via `post_tool_call` only. `maintenance.py`
+  `pre_llm_call`, a note appended by `transform_tool_result` and observation via
+  `post_tool_call` only. `maintenance.py`
   and `/wiki-audit` only read; `test_nothing_is_written` guards that.
   `memory_edit.py` is the upkeep run's write path for memory files (flock on
   `<file>.lock` like Hermes, exact-text matching, backups); hooks never import it. Repairs
@@ -115,6 +116,25 @@ Rules:
 - `oneshot` is skipped by default (0/33 read, no saves).
 - `[ASYNC DELEGATION` messages are system notes: no page matches (6/144 counted as read, mostly
   pages the session had already used).
+
+## Findings database: GitHub writes and unattended runs (since 1.10.0)
+
+- `transform_tool_result` appends the `issue` note to a terminal `command` / execute_code `code`
+  matching `GH_WRITE_RE` (gh/ghw issue|pr create|comment|close); max MAX_ISSUE_NOTES_PER_SESSION,
+  skipped, quiet and failed calls excluded. It only adds text to the result; it never writes.
+- Never decorate a call without `session_id`: tool calls inside an execute_code script come that
+  way and the script parses their result as JSON (the note would crash it after the issue exists).
+- This hook gets no `platform`; subagents are excluded through `_quiet_sessions` (filled by
+  `pre_llm_call` with the same session id).
+- Why there: `pre_llm_call` runs once per user turn; cron and issue-loop runs are one turn, so a
+  nudge armed mid-run never arrives. The tool result is the only mid-run channel.
+- `_is_unattended` = cron or a `oneshot` source label; those get the cron instruction on the
+  first turn. The default skip list still contains `oneshot` (one-shots read 0/33 on one install); loop
+  installs set `WIKI_HINT_SKIP_SOURCES=subagent,tool`.
+- GitHub issues stay the work queue; the wiki holds knowledge that outlives an issue and links to
+  it. Never phrase the instructions as "not in the wiki because it is already in GitHub".
+- Measuring: some Hermes builds keep no `api_content`, so `[wiki-hint]` in state.db reads 0 there
+  while the hook is live. Prove it with a probe that imports the plugin with the profile's .env.
 
 ## Cron mode (since 1.2.0)
 
